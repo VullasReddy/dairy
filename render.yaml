@@ -1,0 +1,39 @@
+# Render Blueprint – Dashboard → New → Blueprint → pick this repository.
+# You will be asked for the values marked sync: false.
+services:
+  - type: web
+    name: aditya-milk-dairy
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL          # Supabase / Neon / Render Postgres connection string (or MySQL)
+        sync: false
+      - key: ADMIN_EMAIL           # your owner login
+        sync: false
+      - key: ADMIN_PASSWORD        # strong password for the owner login
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DEV_MODE
+        value: "0"
+      - key: PAYMENT_PROVIDER      # offline = UPI / cash confirmed by admin; razorpay once you have keys
+        value: offline
+      - key: BUSINESS_TZ
+        value: Asia/Kolkata
+      - key: FRONTEND_URL          # e.g. https://adityamilkdairy.com (used in email links)
+        sync: false
+      - key: CORS_ORIGINS          # same as FRONTEND_URL
+        sync: false
+      - key: SMTP_HOST             # optional – e.g. smtp.hostinger.com
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
