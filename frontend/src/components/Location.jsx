@@ -35,6 +35,23 @@ export function LocationProvider({ children }) {
 }
 export const useLocation2 = () => useContext(Ctx)
 
+/** Detect the customer's city from browser GPS. Resolves to a location object, rejects with a readable message. */
+export function locateByGps() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('Your browser does not support location access. Enter your PIN code instead.')); return }
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const r = await api.get(`/api/public/locate?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
+        if (r.city) resolve({ city: r.city.name, state: r.city.state, available: r.city.available, source: 'gps', nearest: r.nearest_available?.name })
+        else resolve({ city: 'your area', available: false, source: 'gps', nearest: r.nearest_available?.name, nearestKm: r.nearest_available?.distance_km })
+      } catch (e) { reject(e) }
+    }, (err) => reject(new Error(err.code === 1
+      ? 'Location permission was denied. Allow location for this site in your browser (lock icon in the address bar), or enter your PIN code.'
+      : 'Could not detect your location. Please enter your PIN code.')),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 })
+  })
+}
+
 /* ---------------------------------------------------------------- header chip */
 export function LocationChip() {
   const { loc, openPicker } = useLocation2()
@@ -111,19 +128,9 @@ function LocationPicker() {
     else setResult(l)
   }
 
-  const useGps = () => {
-    if (!navigator.geolocation) { setGps({ busy: false, msg: 'Your browser does not support location access. Choose your city below.' }); return }
+  const useGps = async () => {
     setGps({ busy: true, msg: null })
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      try {
-        const r = await api.get(`/api/public/locate?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
-        setGps({ busy: false, msg: null })
-        if (r.city) choose({ city: r.city.name, state: r.city.state, available: r.city.available, source: 'gps', nearest: r.nearest_available?.name })
-        else choose({ city: 'your area', available: false, source: 'gps', nearest: r.nearest_available?.name, nearestKm: r.nearest_available?.distance_km })
-      } catch (e) { setGps({ busy: false, msg: e.message }) }
-    }, (err) => {
-      setGps({ busy: false, msg: err.code === 1 ? 'Location permission was denied. Allow location in your browser, or choose your city below.' : 'Could not detect your location. Choose your city below.' })
-    }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 600000 })
+    try { const l = await locateByGps(); setGps({ busy: false, msg: null }); choose(l) } catch (e) { setGps({ busy: false, msg: e.message }) }
   }
 
   const checkPin = async (e) => {

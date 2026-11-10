@@ -273,7 +273,8 @@ def seed(demo=True):
         print("Seed complete.")
         print(f"  Owner admin: {admin_email}")
         if demo:
-            print("  Admin:    admin@adityamilkdairy.com / Admin@123")
+            if not os.getenv("ADMIN_PASSWORD"):
+                print(f"  Admin:    {admin_email} / Admin@123")
             print("  Manager:  ops@adityamilkdairy.com / Manager@123")
             print("  Delivery: ravi.delivery@adityamilkdairy.com / Staff@123")
             print("  Customer: customer@example.com / Customer@123  (DEMO data – see demo_data.py)")

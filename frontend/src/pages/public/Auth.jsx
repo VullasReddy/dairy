@@ -3,6 +3,18 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { useAuth, useToast } from '../../context'
 import { Field, Logo, Spinner } from '../../components/ui'
+import { Eye, EyeOff } from 'lucide-react'
+
+/** Password input with a show/hide toggle. */
+function PasswordInput({ id, value, onChange, className = '', autoComplete }) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="pw-wrap">
+      <input id={id} type={show ? 'text' : 'password'} className={`input ${className}`} autoComplete={autoComplete} value={value} onChange={onChange} />
+      <button type="button" className="pw-eye" onClick={() => setShow((x) => !x)} aria-label={show ? 'Hide password' : 'Show password'}>{show ? <EyeOff size={18} /> : <Eye size={18} />}</button>
+    </div>
+  )
+}
 
 const homeFor = (u) => (u.role === 'admin' ? '/admin' : u.role === 'staff' ? '/staff' : '/account')
 
@@ -42,7 +54,7 @@ export function Login() {
       <form onSubmit={submit} noValidate>
         {err && <div className="notice err" style={{ marginBottom: 12 }} role="alert">{err}</div>}
         <Field label="Email or mobile number" id="l-email"><input id="l-email" className="input" autoComplete="username" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-        <Field label="Password" id="l-pw"><input id="l-pw" type="password" className="input" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+        <Field label="Password" id="l-pw"><PasswordInput id="l-pw" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
         <div style={{ textAlign: 'right', marginTop: -6, marginBottom: 14 }}><Link to="/forgot-password" style={{ fontSize: 13 }}>Forgot password?</Link></div>
         <button className="btn btn-navy btn-block btn-lg" disabled={busy}>{busy && <Spinner />} Log in</button>
       </form>
@@ -86,8 +98,8 @@ export function Register() {
         <Field label="Email" error={err.email} id="r-email"><input id="r-email" type="email" className={`input ${err.email ? 'err' : ''}`} autoComplete="email" value={f.email} onChange={set('email')} /></Field>
         <Field label="Mobile number" error={err.phone} id="r-phone"><input id="r-phone" className={`input ${err.phone ? 'err' : ''}`} inputMode="tel" autoComplete="tel" placeholder="10-digit mobile" value={f.phone} onChange={set('phone')} /></Field>
         <div className="form-row">
-          <Field label="Password" error={err.password} id="r-pw"><input id="r-pw" type="password" className={`input ${err.password ? 'err' : ''}`} autoComplete="new-password" value={f.password} onChange={set('password')} /></Field>
-          <Field label="Confirm password" error={err.confirm} id="r-pw2"><input id="r-pw2" type="password" className={`input ${err.confirm ? 'err' : ''}`} autoComplete="new-password" value={f.confirm} onChange={set('confirm')} /></Field>
+          <Field label="Password" error={err.password} id="r-pw"><PasswordInput id="r-pw" className={err.password ? 'err' : ''} autoComplete="new-password" value={f.password} onChange={set('password')} /></Field>
+          <Field label="Confirm password" error={err.confirm} id="r-pw2"><PasswordInput id="r-pw2" className={err.confirm ? 'err' : ''} autoComplete="new-password" value={f.confirm} onChange={set('confirm')} /></Field>
         </div>
         <label className="check"><input type="checkbox" checked={f.agree} onChange={set('agree')} /> I agree to the <Link to="/policy/terms" target="_blank">Terms</Link> and <Link to="/policy/privacy" target="_blank">Privacy Policy</Link></label>
         {err.agree && <div className="field"><span className="error">{err.agree}</span></div>}
@@ -135,7 +147,7 @@ export function ResetPassword() {
       {msg?.message ? <div className="notice ok">{msg.message} <Link to="/login">Log in</Link></div> : (
         <form onSubmit={submit}>
           {msg?.error && <div className="notice err">{msg.error}</div>}
-          <Field label="New password" hint="At least 8 characters with a letter and a number" id="rp"><input id="rp" type="password" className="input" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+          <Field label="New password" hint="At least 8 characters with a letter and a number" id="rp"><PasswordInput id="rp" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
           <button className="btn btn-navy btn-block">Update password</button>
         </form>
       )}

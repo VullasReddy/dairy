@@ -123,3 +123,5 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .topbar { padding: 0 14px; }
   .avatar-chip span { display: none; }
 }
+.cols-2 > *, .cols-even > *, .content > * { min-width: 0; }
+.panel-head > * { min-width: 0; }

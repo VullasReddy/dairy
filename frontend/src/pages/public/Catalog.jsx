@@ -4,7 +4,7 @@ import { api, inr } from '../../api'
 import { useAuth, useCart, useFetch, useReveal, useToast } from '../../context'
 import { I } from '../../components/Icons'
 import { PlanCard } from '../../components/cards'
-import { useLocation2 } from '../../components/Location'
+import { useLocation2, locateByGps } from '../../components/Location'
 import { Empty, ErrorBox, SectionTitle, Skeleton, Spinner } from '../../components/ui'
 
 export function PageHero({ title, sub, crumbs }) {
@@ -184,7 +184,8 @@ export function QuoteSummary({ q, loading, error, children }) {
 
 /* ------------------------------------------------------------------ subscription builder */
 export function Subscriptions() {
-  const { loc, openPicker } = useLocation2()
+  const { loc, openPicker, setLocation, available } = useLocation2()
+  const [gpsBusy, setGpsBusy] = useState(false)
   const { data: plans } = useFetch('/api/public/plans')
   const { data: products } = useFetch('/api/public/products')
   const [params] = useSearchParams()
@@ -208,11 +209,29 @@ export function Subscriptions() {
   const { q, loading, error } = useQuote(cart.cart.items, cart.cart.plan_id)
   const qtyOf = (vid) => cart.cart.items.find((i) => i.variant_id === vid)?.daily_qty || 0
   const setQty = (v, n) => { if (!qtyOf(v.id) && n > 0) cart.add(v, n); else cart.setQty(v.id, n) }
+  const cityList = available.map((c) => c.name).join(', ')
   const checkPin = async (e) => {
     e.preventDefault()
     if (!/^\d{6}$/.test(pin)) { setPinRes({ ok: false, msg: 'Enter a 6-digit PIN code.' }); return }
-    const r = await api.get(`/api/public/pincode/${pin}`)
-    setPinRes(r.serviceable ? { ok: true, msg: `Great news! We deliver to ${r.area || pin}, ${r.city}.` } : { ok: false, msg: `Sorry, we don't deliver to ${pin} yet. Leave us a message on the Contact page.` })
+    try {
+      const r = await api.get(`/api/public/pincode/${pin}`)
+      if (r.serviceable) {
+        setLocation({ city: r.city, area: r.area, pincode: pin, available: true, source: 'pin' })
+        setPinRes({ ok: true, msg: `Great news! We deliver to ${r.area}, ${r.city}.` })
+      } else {
+        setPinRes({ ok: false, msg: `Sorry, we don't deliver to ${pin} yet. We deliver in ${cityList}.` })
+      }
+    } catch (e2) { setPinRes({ ok: false, msg: e2.message }) }
+  }
+  const useGps = async () => {
+    setGpsBusy(true); setPinRes(null)
+    try {
+      const l = await locateByGps()
+      setLocation(l)
+      setPinRes(l.available
+        ? { ok: true, msg: `📍 You're in ${l.city}. Great news – we deliver here! Enter your PIN code to confirm your exact area.` }
+        : { ok: false, msg: `📍 Sorry, we don't deliver to ${l.city} yet.${l.nearest ? ` Nearest service city: ${l.nearest}${l.nearestKm ? ` (${Math.round(l.nearestKm)} km)` : ''}.` : ''} We deliver in ${cityList}.` })
+    } catch (e) { setPinRes({ ok: false, msg: e.message }) } finally { setGpsBusy(false) }
   }
 
   return (
@@ -247,8 +266,13 @@ export function Subscriptions() {
             <div className="card">
               <h3 style={{ fontSize: 18 }}>Check delivery availability</h3>
               <p className="muted text-sm mt-0">We deliver in <b className="text-navy-ink">Vijayawada, Hyderabad, Bengaluru and Chennai</b>.</p>
-              <form onSubmit={checkPin} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <input className="input" style={{ maxWidth: 220 }} inputMode="numeric" maxLength={6} placeholder="Enter PIN code" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} aria-label="PIN code" />
+              <button type="button" className="gps-btn mb-3" onClick={useGps} disabled={gpsBusy}>
+                <span className="gps-ic">{gpsBusy ? <Spinner /> : <I.pin size={20} />}</span>
+                <span><b>Use my current location</b><small>{gpsBusy ? 'Detecting your location…' : 'Check instantly using GPS'}</small></span>
+              </button>
+              <div className="or-line !mt-1 !mb-3"><span>or enter your PIN code</span></div>
+              <form onSubmit={checkPin} style={{ display: 'flex', gap: 10 }}>
+                <input className="input" style={{ flex: 1, minWidth: 0, maxWidth: 320 }} inputMode="numeric" maxLength={6} placeholder="Enter PIN code" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} aria-label="PIN code" />
                 <button className="btn btn-outline">Check</button>
               </form>
               {pinRes && <div className={`notice ${pinRes.ok ? 'ok' : 'warn'}`} style={{ marginTop: 12 }}>{pinRes.msg}</div>}
