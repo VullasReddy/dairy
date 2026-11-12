@@ -4,7 +4,8 @@ from decimal import Decimal
 
 from ..extensions import db
 from ..models import (Subscription, SubscriptionSkip, DeliverySchedule, DeliveryTracking, DeliveryRoute,
-                      Order, DELIVERY_STATUSES)
+                      Order, OrderItem, Payment, DeliveryAddon, ProductVariant, DELIVERY_STATUSES)
+from .. import clock
 from ..utils import ApiError, today, settings, notify, notify_admins, audit
 
 OPEN_STATUSES = ("scheduled", "assigned")
@@ -43,10 +44,23 @@ def housekeeping():
         o.status = "failed"
         if o.subscription and o.subscription.status == "pending_payment":
             o.subscription.status = "failed"
+        for a in o.addons:
+            if a.status == "pending_payment":
+                a.status = "failed"
         for p in o.payments:
             if p.status == "created":
                 p.status = "failed"
                 p.failure_reason = "Payment not completed within 24 hours"
+        changed += 1
+    # extra-milk orders still unpaid when their delivery day arrives can no longer be delivered
+    for a in DeliveryAddon.query.filter(DeliveryAddon.status == "pending_payment", DeliveryAddon.delivery_date <= t).all():
+        a.status = "failed"
+        if a.order and a.order.status == "pending_payment":
+            a.order.status = "failed"
+        for pm in (a.order.payments if a.order else []):
+            if pm.status == "created":
+                pm.status = "failed"
+                pm.failure_reason = "Not paid before the delivery day"
         changed += 1
     if changed:
         db.session.commit()
@@ -67,7 +81,8 @@ def generate_for_date(d: date, actor=None):
         row = DeliverySchedule(
             subscription_id=s.id, delivery_date=d, route_id=route.id if route else None,
             items_snapshot=[{"product": i.variant.product.name, "size": i.variant.label, "qty": i.daily_qty,
-                             "size_ml": i.variant.size_ml} for i in s.items],
+                             "size_ml": i.variant.size_ml} for i in s.items]
+            + [a.snapshot() for a in s.addons if a.status == "confirmed" and a.delivery_date == d],
         )
         if is_skip:
             row.status = "skipped"
@@ -136,6 +151,8 @@ def skip_date(sub: Subscription, d: date, actor, reason=None):
         raise ApiError("You can skip deliveries from tomorrow onwards.", 422)
     if d < sub.start_date or d > sub.end_date:
         raise ApiError("That date is outside your subscription period.", 422)
+    if any(a.delivery_date == d and a.status in ("confirmed", "pending_payment") for a in sub.addons):
+        raise ApiError("You have extra milk booked for that day. Cancel the extra milk first, then skip the day.", 422)
     existing = next((k for k in sub.skips if k.skip_date == d), None)
     if existing and existing.status != "rejected":
         raise ApiError("That day is already skipped or awaiting approval.", 422)
@@ -223,6 +240,7 @@ def pause(sub: Subscription, from_date: date, actor):
     sub.paused_from = max(from_date, sub.start_date)
     for row in _future_open_rows(sub, sub.paused_from):
         set_delivery_status(row, "cancelled", actor, "Subscription paused")
+    _drop_addons(sub, sub.paused_from, actor, "Subscription paused")
     audit(actor, "subscription", sub.id, "pause", {"from": sub.paused_from.isoformat()})
 
 
@@ -263,10 +281,11 @@ def cancel(sub: Subscription, reason, actor):
     sub.cancel_reason = reason
     for row in _future_open_rows(sub, today() + timedelta(days=1)):
         set_delivery_status(row, "cancelled", actor, "Subscription cancelled")
+    _drop_addons(sub, today() + timedelta(days=1), actor, "Subscription cancelled", notify_customer=False)
     if sub.order and sub.order.status == "pending_payment":
         sub.order.status = "cancelled"
     if was_paid and not sub.is_trial:
-        sub.refund_due = remaining_value(sub)
+        sub.refund_due = remaining_value(sub) + Decimal(str(sub.refund_due or 0))
         if sub.refund_due > 0:
             notify_admins("Refund due", f"{sub.user.name} cancelled subscription #{sub.id}. "
                                         f"Refund due ₹{float(sub.refund_due):,.2f}", "payment")
@@ -275,3 +294,126 @@ def cancel(sub: Subscription, reason, actor):
            f"Your subscription #{sub.id} has been cancelled."
            + (f" A refund of ₹{float(sub.refund_due):,.2f} will be processed as per our refund policy."
               if sub.refund_due and sub.refund_due > 0 else ""), "subscription")
+
+
+# ----------------------------------------------------------- extra milk (one-day add-on)
+def change_cutoff_hour():
+    try:
+        return max(0, min(23, int(settings().get("change_cutoff_hour", 21))))
+    except (TypeError, ValueError):
+        return 21
+
+
+def earliest_change_date():
+    """First date a customer can still change: tomorrow, or the day after once tonight's cut-off has passed."""
+    n = clock.now()
+    return n.date() + timedelta(days=2 if n.hour >= change_cutoff_hour() else 1)
+
+
+def _cutoff_text():
+    h = change_cutoff_hour()
+    return f"{(h % 12) or 12} {'PM' if h >= 12 else 'AM'}"
+
+
+def book_addon(sub: Subscription, d: date, variant_id, qty, actor):
+    """Create an extra-milk order for one day. Returns the add-on; the caller starts the payment."""
+    if sub.status != "active":
+        raise ApiError("Extra milk can only be added to an active subscription.", 422)
+    first = earliest_change_date()
+    if d < first:
+        raise ApiError(f"Extra milk must be booked before {_cutoff_text()} the previous day. "
+                       f"The earliest date you can choose now is {first:%d %b}.", 422)
+    if d < sub.start_date or d > sub.end_date:
+        raise ApiError("Choose a date within your subscription period.", 422)
+    if d in sub.skip_dates() or any(k.skip_date == d and k.status == "pending" for k in sub.skips):
+        raise ApiError("That day is skipped. Choose another date.", 422)
+    try:
+        qty = int(qty)
+    except (TypeError, ValueError):
+        raise ApiError("Enter a valid quantity.", 422, "qty")
+    max_qty = int(settings().get("max_daily_qty", 10))
+    if qty < 1 or qty > max_qty:
+        raise ApiError(f"Quantity must be between 1 and {max_qty}.", 422, "qty")
+    v = db.session.get(ProductVariant, int(variant_id or 0))
+    if not v or not v.is_available or not v.product.is_active:
+        raise ApiError("This product is not available right now.", 422, "variant_id")
+    open_count = sum(1 for a in sub.addons if a.delivery_date == d and a.status in ("confirmed", "pending_payment"))
+    if open_count >= 3:
+        raise ApiError("You already have extra milk booked for that day.", 422)
+    amount = (Decimal(v.price) * qty).quantize(Decimal("0.01"))
+    from ..utils import gen_code
+    order = Order(order_number=gen_code("AMX"), user_id=sub.user_id, address_id=sub.address_id, plan_id=None,
+                  subtotal=amount, discount=0, total=amount, kind="addon")
+    db.session.add(order)
+    db.session.flush()
+    db.session.add(OrderItem(order_id=order.id, variant_id=v.id, daily_qty=qty, unit_price=v.price, days=1,
+                             line_total=amount))
+    addon = DeliveryAddon(subscription_id=sub.id, order_id=order.id, delivery_date=d, variant_id=v.id, qty=qty,
+                          unit_price=v.price, amount=amount)
+    db.session.add(addon)
+    sub.addons.append(addon)
+    db.session.flush()
+    audit(actor, "subscription", sub.id, "addon_booked",
+          {"date": d.isoformat(), "item": f"{v.product.name} {v.label} x{qty}", "amount": float(amount)})
+    return addon
+
+
+def confirm_addon(addon: DeliveryAddon):
+    """Called once the extra-milk payment is verified. Adds the item to that day's delivery if already generated."""
+    if addon.status == "confirmed":
+        return
+    addon.status = "confirmed"
+    row = DeliverySchedule.query.filter_by(subscription_id=addon.subscription_id,
+                                           delivery_date=addon.delivery_date).first()
+    if row and row.status in OPEN_STATUSES:
+        items = [i for i in (row.items_snapshot or []) if i.get("addon_id") != addon.id]
+        row.items_snapshot = items + [addon.snapshot()]
+    sub = addon.subscription
+    notify(sub.user, "Extra milk confirmed",
+           f"{addon.qty} x {addon.variant.product.name} {addon.variant.label} will be delivered with your milk on "
+           f"{addon.delivery_date:%d %b %Y}.", "subscription", email=False)
+    notify_admins("Extra milk order", f"{sub.user.name} – {addon.qty} x {addon.variant.product.name} "
+                                      f"{addon.variant.label} on {addon.delivery_date:%d %b}", "booking")
+
+
+def cancel_addon(addon: DeliveryAddon, actor, by_admin=False):
+    if addon.status not in ("confirmed", "pending_payment"):
+        raise ApiError("This extra milk order is already closed.", 422)
+    if not by_admin and addon.delivery_date < earliest_change_date():
+        raise ApiError(f"Changes for {addon.delivery_date:%d %b} closed at {_cutoff_text()} the previous day.", 422)
+    was_paid = addon.status == "confirmed"
+    addon.status = "cancelled"
+    _remove_from_schedule(addon)
+    order = addon.order
+    if order:
+        order.status = "cancelled"
+        for pm in order.payments:
+            if pm.status == "created":
+                pm.status = "failed"
+                pm.failure_reason = "Extra milk order cancelled"
+    sub = addon.subscription
+    if was_paid:
+        sub.refund_due = Decimal(str(sub.refund_due or 0)) + Decimal(addon.amount)
+        notify_admins("Refund due", f"{sub.user.name} cancelled extra milk for {addon.delivery_date:%d %b}. "
+                                    f"Refund due ₹{float(addon.amount):,.2f}", "payment")
+    audit(actor, "subscription", sub.id, "addon_cancelled", {"addon": addon.id, "paid": was_paid})
+    return was_paid
+
+
+def _remove_from_schedule(addon):
+    row = DeliverySchedule.query.filter_by(subscription_id=addon.subscription_id,
+                                           delivery_date=addon.delivery_date).first()
+    if row and row.status in OPEN_STATUSES and row.items_snapshot:
+        row.items_snapshot = [i for i in row.items_snapshot if i.get("addon_id") != addon.id]
+
+
+def _drop_addons(sub, from_date, actor, reason, notify_customer=True):
+    total = Decimal("0")
+    for a in list(sub.addons):
+        if a.delivery_date >= from_date and a.status in ("confirmed", "pending_payment"):
+            paid = cancel_addon(a, actor, by_admin=True)
+            if paid:
+                total += Decimal(a.amount)
+    if total and notify_customer:
+        notify(sub.user, "Extra milk cancelled", f"Extra milk booked after {from_date:%d %b} was cancelled ({reason}). "
+                                                 f"₹{float(total):,.2f} will be refunded.", "subscription")

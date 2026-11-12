@@ -62,7 +62,7 @@ class AdminRole(db.Model):
 class User(TimestampMixin, db.Model):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    email = db.Column(db.String(120), unique=True, nullable=True, index=True)  # optional for customers
     phone = db.Column(db.String(15), index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="customer")  # customer | admin | staff
@@ -86,7 +86,7 @@ class User(TimestampMixin, db.Model):
 
     @property
     def name(self):
-        return self.profile.full_name if self.profile else self.email
+        return self.profile.full_name if self.profile else (self.email or self.phone)
 
     def has_permission(self, code):
         """code like "products.view" / "products.manage". manage implies view."""
@@ -125,9 +125,11 @@ class CustomerProfile(db.Model):
     full_name = db.Column(db.String(120), nullable=False)
     alt_phone = db.Column(db.String(15))
     preferred_time = db.Column(db.String(30), default="6:00 AM - 8:00 AM")
+    whatsapp_opt_in = db.Column(db.Boolean, default=True, server_default=db.true(), nullable=False)
 
     def to_dict(self):
-        return {"full_name": self.full_name, "alt_phone": self.alt_phone, "preferred_time": self.preferred_time}
+        return {"full_name": self.full_name, "alt_phone": self.alt_phone, "preferred_time": self.preferred_time,
+                "whatsapp_opt_in": bool(self.whatsapp_opt_in)}
 
 
 class Address(TimestampMixin, db.Model):
@@ -139,21 +141,30 @@ class Address(TimestampMixin, db.Model):
     line2 = db.Column(db.String(200))
     landmark = db.Column(db.String(120))
     area = db.Column(db.String(100))
-    city = db.Column(db.String(80), default="Vijayawada")
+    city = db.Column(db.String(80), default="Narasaraopet")
     pincode = db.Column(db.String(6), nullable=False, index=True)
     instructions = db.Column(db.String(255))
     is_default = db.Column(db.Boolean, default=False)
     is_deleted = db.Column(db.Boolean, default=False)
+    lat = db.Column(db.Float)  # map pin dropped by the customer (optional)
+    lng = db.Column(db.Float)
 
     def full(self):
         parts = [self.line1, self.line2, self.landmark and f"Near {self.landmark}", self.area, self.city, self.pincode]
         return ", ".join(p for p in parts if p)
+
+    def map_url(self):
+        """Google Maps directions link for delivery staff – exact pin when set, otherwise the address text."""
+        from urllib.parse import quote_plus
+        dest = f"{self.lat},{self.lng}" if self.lat is not None and self.lng is not None else quote_plus(self.full())
+        return f"https://www.google.com/maps/dir/?api=1&destination={dest}"
 
     def to_dict(self):
         return {
             "id": self.id, "label": self.label, "line1": self.line1, "line2": self.line2,
             "landmark": self.landmark, "area": self.area, "city": self.city, "pincode": self.pincode,
             "instructions": self.instructions, "is_default": self.is_default, "full": self.full(),
+            "lat": self.lat, "lng": self.lng, "map_url": self.map_url(),
         }
 
 
@@ -251,7 +262,7 @@ class ServiceablePincode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     pincode = db.Column(db.String(6), unique=True, nullable=False)
     area = db.Column(db.String(100))
-    city = db.Column(db.String(60), nullable=False, default="Vijayawada", server_default="Vijayawada", index=True)
+    city = db.Column(db.String(60), nullable=False, default="Narasaraopet", server_default="Vijayawada", index=True)
     is_active = db.Column(db.Boolean, default=True)
 
     def to_dict(self):
@@ -289,12 +300,21 @@ class Order(TimestampMixin, db.Model):
     discount = db.Column(db.Numeric(10, 2), default=0)
     total = db.Column(db.Numeric(10, 2), default=0)
     status = db.Column(db.String(20), default="pending_payment")  # pending_payment|confirmed|failed|cancelled
+    kind = db.Column(db.String(20), default="subscription", server_default="subscription", nullable=False)  # subscription | addon
     idempotency_key = db.Column(db.String(64), unique=True)
     user = db.relationship("User")
     address = db.relationship("Address")
     plan = db.relationship("SubscriptionPlan")
     items = db.relationship("OrderItem", backref="order", cascade="all, delete-orphan")
     subscription = db.relationship("Subscription", backref="order", uselist=False)
+    addons = db.relationship("DeliveryAddon", backref="order")
+
+    @property
+    def linked_subscription(self):
+        """The subscription this order belongs to (a plan booking, or the plan an extra-milk order was added to)."""
+        if self.subscription:
+            return self.subscription
+        return self.addons[0].subscription if self.addons else None
 
     def to_dict(self):
         return {
@@ -303,7 +323,9 @@ class Order(TimestampMixin, db.Model):
             "address": self.address.to_dict() if self.address else None, "subtotal": money(self.subtotal),
             "discount": money(self.discount), "total": money(self.total), "status": self.status,
             "items": [i.to_dict() for i in self.items], "created_at": self.created_at.isoformat(),
-            "subscription_id": self.subscription.id if self.subscription else None,
+            "subscription_id": self.linked_subscription.id if self.linked_subscription else None,
+            "kind": self.kind or "subscription",
+            "addon_date": self.addons[0].delivery_date.isoformat() if self.addons else None,
         }
 
 
@@ -414,6 +436,50 @@ class SubscriptionSkip(db.Model):
                 "created_at": self.created_at.isoformat() if self.created_at else None}
 
 
+class DeliveryAddon(TimestampMixin, db.Model):
+    """One-day extra milk on top of a subscription ("1 litre extra tomorrow"). Paid separately; once paid it is
+    added to that day's delivery."""
+    __tablename__ = "delivery_addons"
+    id = db.Column(db.Integer, primary_key=True)
+    subscription_id = db.Column(db.Integer, db.ForeignKey("subscriptions.id"), nullable=False, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
+    delivery_date = db.Column(db.Date, nullable=False, index=True)
+    variant_id = db.Column(db.Integer, db.ForeignKey("product_variants.id"), nullable=False)
+    qty = db.Column(db.Integer, nullable=False)
+    unit_price = db.Column(db.Numeric(10, 2), nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    status = db.Column(db.String(20), default="pending_payment", index=True)  # pending_payment|confirmed|cancelled|failed
+    subscription = db.relationship("Subscription", backref=db.backref("addons", order_by="DeliveryAddon.delivery_date"))
+    variant = db.relationship("ProductVariant")
+
+    def snapshot(self):
+        return {"product": self.variant.product.name, "size": self.variant.label, "qty": self.qty,
+                "size_ml": self.variant.size_ml, "extra": True, "addon_id": self.id}
+
+    def to_dict(self):
+        return {"id": self.id, "subscription_id": self.subscription_id, "order_id": self.order_id,
+                "order_number": self.order.order_number if self.order else None,
+                "delivery_date": self.delivery_date.isoformat(), "variant_id": self.variant_id,
+                "product": self.variant.product.name, "size": self.variant.label, "qty": self.qty,
+                "unit_price": money(self.unit_price), "amount": money(self.amount), "status": self.status,
+                "provider_order_id": (self.order.payments[-1].provider_order_id
+                                      if self.order and self.order.payments else None),
+                "created_at": self.created_at.isoformat()}
+
+
+class OtpCode(db.Model):
+    """One-time login codes. Only a hash of the code is stored."""
+    __tablename__ = "otp_codes"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    code_hash = db.Column(db.String(64), nullable=False)
+    purpose = db.Column(db.String(20), default="login")
+    expires_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, default=0)
+    used = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class Payment(TimestampMixin, db.Model):
     __tablename__ = "payments"
     id = db.Column(db.Integer, primary_key=True)
@@ -476,6 +542,7 @@ class DeliverySchedule(TimestampMixin, db.Model):
             "customer": s.user.name, "phone": s.user.phone, "address": a.full() if a else "",
             "area": a.area if a else "", "pincode": a.pincode if a else "",
             "instructions": a.instructions if a else "", "items": self.items_snapshot or [],
+            "lat": a.lat if a else None, "lng": a.lng if a else None, "map_url": a.map_url() if a else None,
             "staff_id": self.staff_id, "staff": self.staff.name if self.staff else None,
             "route_id": self.route_id, "route": self.route.name if self.route else None,
             "status": self.status, "note": self.note,

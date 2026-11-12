@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, addDays, fmtDate, todayISO } from '../../api'
+import { api, addDays, fmtDate, todayISO, waLink } from '../../api'
 import { useAuth, useFetch, useToast } from '../../context'
 import { I } from '../../components/Icons'
 import { Empty, Logo, Modal, SkeletonRows, Status, Field } from '../../components/ui'
@@ -46,10 +46,11 @@ export default function StaffApp() {
             </div>
             <div style={{ fontSize: 14, margin: '6px 0' }}>{r.address}</div>
             {r.instructions && <div className="notice info" style={{ padding: '6px 10px', fontSize: 13, marginBottom: 6 }}>{r.instructions}</div>}
-            <div style={{ fontSize: 14, marginBottom: 10 }}>{r.items.map((i, k) => <span key={k} className="pill blue" style={{ marginRight: 6 }}>{i.qty} × {i.product} {i.size}</span>)}</div>
+            <div style={{ fontSize: 14, marginBottom: 10 }}>{r.items.map((i, k) => <span key={k} className={`pill ${i.extra ? 'gold' : 'blue'}`} style={{ marginRight: 6 }}>{i.qty} × {i.product} {i.size}{i.extra && ' · EXTRA'}</span>)}</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <a className="btn btn-sm btn-outline" href={`tel:${r.phone}`}><I.phone size={15} /> Call</a>
-              <a className="btn btn-sm btn-outline" href={`https://maps.google.com/?q=${encodeURIComponent(r.address)}`} target="_blank" rel="noreferrer"><I.map size={15} /> Map</a>
+              {waLink(r.phone) && <a className="btn btn-sm btn-outline wa-btn" href={waLink(r.phone, `Hi ${r.customer?.split(' ')[0] || ''}, this is your Aditya Milk Dairy delivery partner.`)} target="_blank" rel="noreferrer"><I.whatsapp width={15} height={15} /> WhatsApp</a>}
+              <a className="btn btn-sm btn-outline" href={r.map_url || `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address)}`} target="_blank" rel="noreferrer"><I.map size={15} /> {r.lat != null ? 'Navigate (pin)' : 'Navigate'}</a>
               {r.status === 'assigned' && <button className="btn btn-sm btn-cream" onClick={() => set(r.id, 'out_for_delivery')}>Start</button>}
               {['assigned', 'out_for_delivery'].includes(r.status) && <>
                 <button className="btn btn-sm btn-navy" onClick={() => set(r.id, 'delivered')}><I.check size={15} /> Delivered</button>

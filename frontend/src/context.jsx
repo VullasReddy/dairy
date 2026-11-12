@@ -59,8 +59,12 @@ export function AuthProvider({ children }) {
     const d = await api.post('/api/auth/register', payload)
     tokenStore.set(d.token); setUser(d.user); return d
   }
+  const loginWithOtp = async (identifier, code) => {
+    const d = await api.post('/api/auth/otp/verify', { identifier, code })
+    tokenStore.set(d.token); setUser(d.user); return d.user
+  }
   const logout = () => { tokenStore.set(null); setUser(null) }
-  return <AuthCtx.Provider value={{ user, ready, login, register, logout, refresh, setUser }}>{children}</AuthCtx.Provider>
+  return <AuthCtx.Provider value={{ user, ready, login, loginWithOtp, register, logout, refresh, setUser }}>{children}</AuthCtx.Provider>
 }
 export const useAuth = () => useContext(AuthCtx)
 

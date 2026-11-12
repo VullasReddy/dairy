@@ -106,13 +106,33 @@ def mark_success(provider_order_id, provider_payment_id, method="online"):
             sub.end_date = sub.start_date + timedelta(days=sub.plan.duration_days - 1)
         from .delivery import activate_after_confirmation
         activate_after_confirmation(sub)
+    addon_live = False
+    if order.kind == "addon":
+        from .delivery import confirm_addon
+        for a in order.addons:
+            if a.status in ("pending_payment", "failed"):
+                if a.delivery_date > today():
+                    confirm_addon(a)
+                    addon_live = True
+                else:  # paid too late for that delivery day – keep the money as a refund due
+                    a.status = "cancelled"
+                    a.subscription.refund_due = float(a.subscription.refund_due or 0) + float(a.amount)
+                    notify_admins("Refund due", f"Extra milk for {a.delivery_date:%d %b} was paid after the day "
+                                                f"passed – refund ₹{float(a.amount):,.2f} to {order.user.name}.", "payment")
     audit(None, "payment", p.id, "payment_success", {"txn": provider_payment_id, "amount": float(p.amount)})
+    if sub:
+        detail = f"Your {sub.plan.name} subscription starts on {sub.start_date:%d %b %Y}."
+    elif order.kind == "addon":
+        detail = ("Your extra milk is confirmed." if addon_live else
+                  "The delivery day has already passed, so this amount will be refunded.")
+    else:
+        detail = ""
     notify(order.user, "Payment successful",
-           f"We received ₹{float(p.amount):,.2f} for order {order.order_number} (receipt {p.receipt_number}). "
-           f"Your {sub.plan.name if sub else ''} subscription starts on {sub.start_date:%d %b %Y}." if sub else "",
+           f"We received ₹{float(p.amount):,.2f} for order {order.order_number} (receipt {p.receipt_number}). {detail}",
            "payment")
-    notify_admins("New paid subscription", f"{order.user.name} paid ₹{float(p.amount):,.2f} – {order.order_number}",
-                  "booking")
+    if order.kind != "addon":
+        notify_admins("New paid subscription", f"{order.user.name} paid ₹{float(p.amount):,.2f} – {order.order_number}",
+                      "booking")
     db.session.commit()
     return p, True
 
@@ -126,6 +146,9 @@ def mark_failed(provider_order_id, reason="Payment failed or was cancelled"):
     p.order.status = "failed"
     if p.order.subscription and p.order.subscription.status == "pending_payment":
         p.order.subscription.status = "failed"
+    for a in p.order.addons:
+        if a.status == "pending_payment":
+            a.status = "failed"
     audit(None, "payment", p.id, "payment_failed", {"reason": reason})
     notify(p.order.user, "Payment failed", f"Payment for order {p.order.order_number} did not go through. "
                                            "You can retry from My Subscriptions.", "payment", email=False)
@@ -150,7 +173,7 @@ def refund(payment: Payment, amount, note, actor):
     payment.refund_note = note
     if float(payment.refund_amount) >= float(payment.amount):
         payment.status = "refunded"
-    sub = payment.order.subscription
+    sub = payment.order.linked_subscription
     if sub:
         sub.refund_due = max(0, float(sub.refund_due or 0) - amount)
     audit(actor, "payment", payment.id, "refund", {"amount": amount, "note": note})

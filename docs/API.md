@@ -14,6 +14,8 @@ Responses: `{"ok": true, "data": ...}` or `{"ok": false, "error": "message", "fi
 | POST | `/api/auth/reset-password` | reset |
 | POST | `/api/auth/verify-email` | verify email |
 | POST | `/api/auth/resend-verification` | resend |
+| POST | `/api/auth/otp/request` | send a 6-digit login code (mobile → SMS / WhatsApp + email; email → email). Customers & staff only |
+| POST | `/api/auth/otp/verify` | log in with the code (5 tries, expires in OTP_TTL_MINUTES) |
 
 ## Public website (no login)
 
@@ -64,6 +66,12 @@ Responses: `{"ok": true, "data": ...}` or `{"ok": false, "error": "message", "fi
 | POST | `/api/me/reviews` | add review |
 | GET | `/api/me/reviews` | my reviews |
 | GET | `/api/me/support` | support |
+
+### Extra milk (one-day add-on)
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/me/subscriptions/<id>/addons` | `{date, variant_id, qty}` → creates an order + payment (same Pay page). Must be booked before the cut-off hour the previous day |
+| POST | `/api/me/subscriptions/<id>/addons/<aid>/cancel` | before the cut-off; a paid add-on becomes a refund due |
 
 ## Admin app (role: admin; GET needs <module>.view, writes need <module>.manage)
 
@@ -144,6 +152,14 @@ Responses: `{"ok": true, "data": ...}` or `{"ok": false, "error": "message", "fi
 | DELETE | `/api/admin/pincodes/<int:pid>` | delete pincode |
 | DELETE | `/api/admin/enquiries/<int:eid>` | delete enquiry |
 | GET | `/api/admin/orders` | orders |
+
+### Extra milk, integrations
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/admin/subscriptions/<id>/addons/<aid>/confirm-payment` | record a UPI / cash payment `{reference, method}` |
+| POST | `/api/admin/subscriptions/<id>/addons/<aid>/cancel` | cancel (refund due if paid) |
+| GET | `/api/admin/integrations` | which of WhatsApp / SMS / email / payments are configured (no keys returned) |
+| POST | `/api/admin/integrations/whatsapp-test` | `{phone}` sends a WhatsApp test message |
 
 ## Delivery staff app (role: staff) & Razorpay webhook
 

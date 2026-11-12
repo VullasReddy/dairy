@@ -4,6 +4,7 @@
 # A city is "available" when it has active serviceable areas; the others show as "Not available yet".
 # Editable in Admin -> Website Content -> Homepage & About -> "Location picker cities".
 CITIES = [
+    {"name": "Narasaraopet", "state": "Andhra Pradesh", "lat": 16.2349, "lng": 80.0496},
     {"name": "Vijayawada", "state": "Andhra Pradesh", "lat": 16.5062, "lng": 80.6480},
     {"name": "Hyderabad", "state": "Telangana", "lat": 17.3850, "lng": 78.4867},
     {"name": "Bengaluru", "state": "Karnataka", "lat": 12.9716, "lng": 77.5946},

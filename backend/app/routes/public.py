@@ -45,7 +45,11 @@ def business():
 @bp.get("/site")
 def site():
     from flask import current_app
-    return ok({"business": business(), "payment_provider": current_app.config["PAYMENT_PROVIDER"], "hero": get_content("hero", {}), "about": get_content("about", {}),
+    from ..services.messaging import sms_enabled, whatsapp_enabled
+    cfg = current_app.config
+    return ok({"business": business(), "payment_provider": cfg["PAYMENT_PROVIDER"],
+               "otp_login": bool(sms_enabled() or (whatsapp_enabled() and cfg.get("WHATSAPP_OTP_TEMPLATE"))),
+               "email_enabled": bool(cfg.get("SMTP_HOST")), "hero": get_content("hero", {}), "about": get_content("about", {}),
                "journey": get_content("journey", []), "quality_promise": get_content("quality_promise", []),
                "trust_highlights": get_content("trust_highlights", []), "banners": get_content("banners", [])})
 
@@ -161,6 +165,23 @@ def contact():
     notify_admins(f"New {e.kind}", f"{e.name}: {e.subject or e.message[:60]}", "enquiry")
     db.session.commit()
     return ok({"message": "Thank you! Our team will get back to you within 24 hours.", "id": e.id}, 201)
+
+
+@bp.post("/newsletter")
+@limiter.limit("5 per minute")
+def newsletter():
+    """Footer newsletter sign-up – kept with enquiries (kind = newsletter) so admins can see and export them."""
+    import re
+    p = request.get_json(force=True, silent=True) or {}
+    email = (p.get("email") or "").strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email) or len(email) > 120:
+        raise ApiError("Please enter a valid email address.", 422, "email")
+    if not ContactEnquiry.query.filter_by(kind="newsletter", email=email).first():
+        db.session.add(ContactEnquiry(name=email.split("@")[0][:100], email=email, kind="newsletter",
+                                      subject="Newsletter subscription", message="Subscribed from the website footer.",
+                                      status="resolved"))
+        db.session.commit()
+    return ok({"message": "Thank you for subscribing! You'll hear about offers and updates first."}, 201)
 
 
 # ---------------------------------------------------------------- location picker

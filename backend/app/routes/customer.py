@@ -83,6 +83,8 @@ def update_profile(user):
         if not re.match(r"^[6-9]\d{9}$", phone):
             raise ApiError("Please enter a valid 10-digit mobile number.", 422, "phone")
         user.phone = phone
+    if user.profile and "whatsapp_opt_in" in p:
+        user.profile.whatsapp_opt_in = bool(p["whatsapp_opt_in"])
     if user.profile:
         for k in ("alt_phone", "preferred_time"):
             if k in p:
@@ -115,6 +117,18 @@ def _apply_address(a, p):
     for f in ADDR_FIELDS:
         if f in p:
             setattr(a, f, (p[f] or "").strip()[:255] or None)
+    if "lat" in p or "lng" in p:  # map pin (optional) – both or neither
+        lat, lng = p.get("lat"), p.get("lng")
+        if lat in (None, "") or lng in (None, ""):
+            a.lat = a.lng = None
+        else:
+            try:
+                lat, lng = float(lat), float(lng)
+            except (TypeError, ValueError):
+                raise ApiError("Invalid map location.", 422, "lat")
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise ApiError("Invalid map location.", 422, "lat")
+            a.lat, a.lng = round(lat, 6), round(lng, 6)
     if not a.line1:
         raise ApiError("House / flat and street are required.", 422, "line1")
     if not re.match(r"^\d{6}$", a.pincode or ""):
@@ -288,7 +302,7 @@ def verify_payment(user):
         pay.mark_failed(p["razorpay_order_id"], "Signature verification failed")
         raise ApiError("We could not verify this payment. If money was deducted it will be auto-refunded.", 400)
     pm, _ = pay.mark_success(p["razorpay_order_id"], p["razorpay_payment_id"], p.get("method", "razorpay"))
-    return ok({"payment": pm.to_dict(), "subscription": pm.order.subscription.to_dict()})
+    return ok({"payment": pm.to_dict(), "subscription": pm.order.linked_subscription.to_dict() if pm.order.linked_subscription else None})
 
 
 @bp.post("/payments/mock/<provider_order_id>")
@@ -306,7 +320,7 @@ def mock_payment(user, provider_order_id):
                                  p.get("method", "upi"))
     else:
         pm = pay.mark_failed(provider_order_id, p.get("reason") or "Cancelled by customer")
-    return ok({"payment": pm.to_dict(), "subscription": pm.order.subscription.to_dict()})
+    return ok({"payment": pm.to_dict(), "subscription": pm.order.linked_subscription.to_dict() if pm.order.linked_subscription else None})
 
 
 @bp.get("/payments/status/<provider_order_id>")
@@ -315,7 +329,7 @@ def payment_status(user, provider_order_id):
     pm = Payment.query.filter_by(provider_order_id=provider_order_id).first()
     if not pm or pm.user_id != user.id:
         raise ApiError("Payment not found.", 404)
-    return ok({"payment": pm.to_dict(), "subscription": pm.order.subscription.to_dict(),
+    return ok({"payment": pm.to_dict(), "subscription": pm.order.linked_subscription.to_dict() if pm.order.linked_subscription else None,
                "order": pm.order.to_dict(), "checkout": pay.checkout_payload(pm)})
 
 
@@ -339,7 +353,46 @@ def subscription(user, sid):
     d["deliveries"] = [r.to_dict(with_tracking=True) for r in rows]
     d["payments"] = [p.to_dict() for p in (s.order.payments if s.order else [])]
     d["order"] = s.order.to_dict() if s.order else None
+    d["addons"] = [a.to_dict() for a in s.addons]
+    d["payments"] += [pm.to_dict() for a in s.addons for pm in (a.order.payments if a.order else [])]
+    d["addon_earliest_date"] = dsvc.earliest_change_date().isoformat()
+    d["change_cutoff_hour"] = dsvc.change_cutoff_hour()
     return ok(d)
+
+
+@bp.post("/subscriptions/<int:sid>/addons")
+@limiter.limit("10 per minute")
+@customer_only
+def add_extra_milk(user, sid):
+    """One-day extra milk on top of the subscription. Paid like any order; delivered once paid."""
+    s = own_sub(user, sid)
+    p = request.get_json(force=True, silent=True) or {}
+    require(p, "date", "variant_id", "qty")
+    addon = dsvc.book_addon(s, parse_date(p["date"]), p["variant_id"], p["qty"], user)
+    payment = Payment(order_id=addon.order_id, user_id=user.id, amount=addon.amount)
+    db.session.add(payment)
+    db.session.flush()
+    payment.order = addon.order
+    data = pay.create_gateway_order(payment)
+    if current_app.config["PAYMENT_PROVIDER"] == "offline":
+        notify_admins("Extra milk awaiting payment", f"{user.name} – {addon.order.order_number} – "
+                                                     f"₹{float(addon.amount):,.2f} for {addon.delivery_date:%d %b} (UPI / cash)",
+                      "payment")
+    db.session.commit()
+    return ok({"addon": addon.to_dict(), "payment": data}, 201)
+
+
+@bp.post("/subscriptions/<int:sid>/addons/<int:aid>/cancel")
+@customer_only
+def cancel_extra_milk(user, sid, aid):
+    s = own_sub(user, sid)
+    addon = next((a for a in s.addons if a.id == aid), None)
+    if not addon:
+        raise ApiError("Extra milk order not found.", 404)
+    paid = dsvc.cancel_addon(addon, user)
+    db.session.commit()
+    return ok({"message": "Extra milk cancelled." + (" The amount will be refunded." if paid else ""),
+               "addon": addon.to_dict()})
 
 
 @bp.post("/subscriptions/<int:sid>/<action>")
@@ -386,7 +439,7 @@ def my_orders(user):
     out = []
     for o in rows:
         d = o.to_dict()
-        d["subscription_status"] = o.subscription.status if o.subscription else None
+        d["subscription_status"] = o.linked_subscription.status if o.linked_subscription else None
         d["payment_status"] = o.payments[-1].status if o.payments else ("free" if float(o.total) == 0 else None)
         out.append(d)
     return ok(out)
@@ -406,7 +459,7 @@ def receipt(user, pid):
     if not pm or pm.user_id != user.id or pm.status not in ("success", "refunded"):
         raise ApiError("Receipt not available.", 404)
     return ok({"payment": pm.to_dict(), "order": pm.order.to_dict(),
-               "subscription": pm.order.subscription.to_dict() if pm.order.subscription else None,
+               "subscription": pm.order.linked_subscription.to_dict() if pm.order.linked_subscription else None,
                "customer": {"name": user.name, "email": user.email, "phone": user.phone}})
 
 

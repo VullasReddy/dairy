@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api, addDays, fmtDate, fmtDateTime, inr, todayISO } from '../../api'
+import { api, addDays, fmtDate, fmtDateTime, inr, todayISO, waLink } from '../../api'
 import { useAuth, useCart, useFetch, useSite, useToast } from '../../context'
 import { I } from '../../components/Icons'
 import { Empty, ErrorBox, Field, Modal, SkeletonRows, Spinner, Status } from '../../components/ui'
@@ -11,6 +11,7 @@ import { QuoteSummary, useQuote, PageHero } from '../public/Catalog'
 /* ================================================================ dashboard */
 export function Dashboard() {
   const { data: d, loading, error, reload } = useFetch('/api/me/dashboard')
+  const site = useSite()
   if (loading) return <SkeletonRows n={6} />
   if (error) return <ErrorBox error={error} retry={reload} />
   const active = d.active_subscriptions
@@ -19,7 +20,7 @@ export function Dashboard() {
       <PageHead title={`Hello, ${d.user.name.split(' ')[0]} 👋`} sub="Here's your milk at a glance.">
         <Link to="/subscriptions" className="btn btn-navy"><I.plus size={16} /> New subscription</Link>
       </PageHead>
-      {!d.user.email_verified && <VerifyBanner />}
+      {d.user.email && !d.user.email_verified && site.email_enabled && <VerifyBanner />}
       <div className="stats">
         <Stat icon="box" value={active.length} label="Active plans" />
         <Stat icon="truck" value={d.stats.delivered} label="Deliveries received" tone="green" delay={1} />
@@ -39,7 +40,7 @@ export function Dashboard() {
             ) : (
               <>
                 <h3 style={{ fontSize: 22 }}>No upcoming deliveries</h3>
-                <p style={{ opacity: .85 }}>{d.trial.eligible ? 'Start with a free 1-day trial – no payment needed.' : 'Start a new plan to keep fresh milk coming.'}</p>
+                <p style={{ opacity: .85 }}>{d.trial.eligible ? 'Start with a free 1-day trial – no payment needed.' : 'Choose your milk and plan to get fresh milk coming.'}</p>
                 <Link to="/subscriptions" className="btn btn-gold btn-sm">{d.trial.eligible ? 'Claim free trial' : 'Choose a plan'}</Link>
               </>
             )}
@@ -113,7 +114,38 @@ function SubRow({ s }) {
 }
 
 /* ================================================================ addresses */
-const EMPTY_ADDR = { label: 'Home', line1: '', line2: '', landmark: '', area: '', city: '', pincode: '', instructions: '', is_default: false }
+const EMPTY_ADDR = { label: 'Home', line1: '', line2: '', landmark: '', area: '', city: '', pincode: '', instructions: '', is_default: false, lat: null, lng: null }
+
+const MapPicker = lazy(() => import('../../components/MapPicker'))
+
+function PinSection({ f, setF }) {
+  const [show, setShow] = useState(f.lat != null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const gps = () => {
+    if (!navigator.geolocation) { setMsg('Your browser does not support location access.'); return }
+    setBusy(true); setMsg('')
+    navigator.geolocation.getCurrentPosition((p) => {
+      setF((x) => ({ ...x, lat: Math.round(p.coords.latitude * 1e6) / 1e6, lng: Math.round(p.coords.longitude * 1e6) / 1e6 }))
+      setShow(true); setBusy(false)
+    }, (e) => { setBusy(false); setShow(true); setMsg(e.code === 1 ? 'Location permission denied – tap the map to place the pin instead.' : 'Could not get your location – tap the map to place the pin.') },
+    { enableHighAccuracy: true, timeout: 15000 })
+  }
+  const onPin = (lat, lng) => setF((x) => ({ ...x, lat, lng }))
+  return (
+    <div className="pin-section">
+      <b style={{ fontSize: 14, color: 'var(--navy)' }}>📍 Exact location on map</b> <span className="muted small">(optional – helps our delivery partner find you)</span>
+      {show && <div style={{ marginTop: 10 }}><Suspense fallback={<div className="map-box" style={{ height: 260, display: 'grid', placeItems: 'center' }}><Spinner /></div>}><MapPicker lat={f.lat} lng={f.lng} city={f.city} onChange={onPin} /></Suspense>
+        <div className="small muted" style={{ marginTop: 6 }}>{f.lat != null ? 'Drag the pin or tap the map to adjust.' : 'Tap the map to drop the pin.'}</div></div>}
+      {msg && <div className="small" style={{ color: 'var(--red, #B3261E)', marginTop: 6 }}>{msg}</div>}
+      <div className="pin-actions">
+        <button type="button" className="btn btn-sm btn-outline" onClick={gps} disabled={busy}>{busy ? <Spinner /> : <I.map size={15} />} Use my current location</button>
+        {!show && <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShow(true)}>Choose on map</button>}
+        {show && f.lat != null && <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setF((x) => ({ ...x, lat: null, lng: null })); setShow(false) }}>Remove pin</button>}
+      </div>
+    </div>
+  )
+}
 
 export function AddressForm({ initial, onSaved, onCancel }) {
   const [f, setF] = useState({ ...EMPTY_ADDR, ...(initial || {}) })
@@ -154,6 +186,7 @@ export function AddressForm({ initial, onSaved, onCancel }) {
         <Field label="Area" id="a-ar"><input id="a-ar" className="input" value={f.area || ''} onChange={set('area')} /></Field>
       </div>
       <Field label="City" id="a-city" hint="Filled in from the PIN code"><input id="a-city" className="input" value={f.city || ''} readOnly placeholder="Enter a PIN code above" /></Field>
+      <PinSection f={f} setF={setF} />
       <Field label="Delivery instructions" id="a-in"><input id="a-in" className="input" placeholder="e.g. leave at the door, ring once" value={f.instructions || ''} onChange={set('instructions')} /></Field>
       <label className="check"><input type="checkbox" checked={!!f.is_default} onChange={set('is_default')} /> Make this my default address</label>
       <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
@@ -184,7 +217,7 @@ export function Addresses() {
                 <b style={{ color: 'var(--navy-ink)' }}>{a.label} {a.is_default && <span className="pill blue">Default</span>}</b>
                 {a.serviceable ? <span className="pill green">Serviceable</span> : <span className="pill red">Not serviceable</span>}
               </div>
-              <p style={{ fontSize: 14, margin: '8px 0' }}>{a.full}</p>
+              <p style={{ fontSize: 14, margin: '8px 0' }}>{a.full}</p>{a.lat != null && <div className="small" style={{ color: '#1E7A44', marginBottom: 6 }}>📍 Pinned on map</div>}
               {a.instructions && <p className="muted" style={{ fontSize: 13, margin: 0 }}>“{a.instructions}”</p>}
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}><button className="btn btn-sm btn-outline" onClick={() => setEdit(a)}><I.edit size={15} /> Edit</button><button className="btn btn-sm btn-danger" onClick={() => del(a)}><I.trash size={15} /> Delete</button></div>
             </div></div>
@@ -284,12 +317,17 @@ export function Pay() {
   const { data, loading, error } = useFetch(`/api/me/payments/status/${orderId}`)
   const [method, setMethod] = useState('upi')
   const [busy, setBusy] = useState(false)
-  const done = (r) => nav(`/account/subscriptions/${r.subscription.id}?${r.payment.status === 'success' ? 'paid=1' : 'failed=1'}`, { replace: true })
+  const done = (r) => {
+    const extra = (r.order?.kind || data?.order?.kind) === 'addon'
+    const ok = r.payment.status === 'success'
+    nav(`/account/subscriptions/${r.subscription.id}?${extra ? (ok ? 'extra=1' : 'extra_failed=1') : ok ? 'paid=1' : 'failed=1'}`, { replace: true })
+  }
 
   useEffect(() => { if (data?.payment?.status === 'success') done(data) /* eslint-disable-next-line */ }, [data])
   if (loading) return <div className="container section"><SkeletonRows /></div>
   if (error) return <div className="container section"><ErrorBox error={error} /></div>
   const p = data.payment
+  const isAddon = data.order.kind === 'addon'
 
   const mock = async (outcome) => {
     setBusy(true)
@@ -300,7 +338,7 @@ export function Pay() {
     try {
       await loadRazorpay()
       let pay = data.checkout
-      if (p.status === 'failed') pay = (await api.post(`/api/me/subscriptions/${data.subscription.id}/retry-payment`)).payment
+      if (p.status === 'failed' && !isAddon) pay = (await api.post(`/api/me/subscriptions/${data.subscription.id}/retry-payment`)).payment
       const rz = new window.Razorpay({
         key: pay.key_id, order_id: pay.provider_order_id, amount: pay.amount_paise, currency: 'INR', name: 'Aditya Milk Dairy',
         description: `Order ${data.order.order_number}`, prefill: { name: user.name, email: user.email, contact: user.phone },
@@ -317,13 +355,13 @@ export function Pay() {
       <PageHero title={p.provider === 'offline' ? 'Complete Your Booking' : 'Secure Payment'} sub={`Order ${data.order.order_number}`} />
       <div className="page-bg"><section className="section container">
         <div className="card mock-gateway">
-          <div style={{ textAlign: 'center' }}><div className="muted">Amount payable</div><div style={{ fontSize: 34, fontWeight: 700, color: 'var(--navy)' }}>{inr(p.amount)}</div><div className="muted" style={{ fontSize: 13 }}>{data.subscription.plan} · starts {fmtDate(data.subscription.start_date)}</div></div>
+          <div style={{ textAlign: 'center' }}><div className="muted">Amount payable</div><div style={{ fontSize: 34, fontWeight: 700, color: 'var(--navy)' }}>{inr(p.amount)}</div><div className="muted" style={{ fontSize: 13 }}>{isAddon ? `Extra milk · ${data.order.items.map((i) => `${i.daily_qty} × ${i.product} ${i.size}`).join(', ')} · ${fmtDate(data.order.addon_date)}` : `${data.subscription.plan} · starts ${fmtDate(data.subscription.start_date)}`}</div></div>
           {p.status === 'failed' ? (
             <>
               <div className="notice err" style={{ marginTop: 16 }}>This payment attempt failed{p.failure_reason ? `: ${p.failure_reason}` : ''}.</div>
-              <button className="btn btn-navy btn-block btn-lg" style={{ marginTop: 14 }} disabled={busy} onClick={async () => {
+              {isAddon ? <Link to={`/account/subscriptions/${data.subscription.id}`} className="btn btn-navy btn-block btn-lg" style={{ marginTop: 14 }}>Book extra milk again</Link> : <button className="btn btn-navy btn-block btn-lg" style={{ marginTop: 14 }} disabled={busy} onClick={async () => {
                 try { const r = await api.post(`/api/me/subscriptions/${data.subscription.id}/retry-payment`); nav(`/pay/${r.payment.provider_order_id}`, { replace: true }) } catch (e) { toast.error(e) }
-              }}>Try again</button>
+              }}>Try again</button>}
             </>
           ) : p.provider === 'offline' ? (
             <OfflinePay pay={data.checkout} order={data.order} />
@@ -400,10 +438,11 @@ export function SubscriptionDetail() {
   const days = useMemo(() => {
     if (!s) return []
     const map = Object.fromEntries((s.deliveries || []).map((d) => [d.delivery_date, d.status]))
+    const extra = new Set((s.addons || []).filter((a) => a.status === 'confirmed').map((a) => a.delivery_date))
     const out = []; const t = todayISO()
     for (let d = new Date(s.start_date + 'T00:00:00'); d <= new Date(s.end_date + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
       const iso = addDays(0, d)
-      out.push({ iso, day: d.getDate(), status: map[iso] || (s.skips.includes(iso) ? 'skipped' : iso >= t && ['active', 'paused'].includes(s.status) ? 'upcoming' : ''), today: iso === t })
+      out.push({ iso, day: d.getDate(), status: map[iso] || (s.skips.includes(iso) ? 'skipped' : iso >= t && ['active', 'paused'].includes(s.status) ? 'upcoming' : ''), today: iso === t, extra: extra.has(iso) })
     }
     return out
   }, [s])
@@ -413,6 +452,8 @@ export function SubscriptionDetail() {
     <>
       {params.get('paid') && <div className="notice ok" style={{ marginBottom: 16 }}><I.check /> Payment successful! Your subscription is confirmed.</div>}
       {params.get('new') && <div className="notice ok" style={{ marginBottom: 16 }}><I.check /> Your free trial is booked. Enjoy!</div>}
+      {params.get('extra') && <div className="notice ok" style={{ marginBottom: 16 }}><I.check /> Payment successful! Your extra milk is confirmed.</div>}
+      {params.get('extra_failed') && <div className="notice err" style={{ marginBottom: 16 }}>Extra milk payment did not go through. You can book it again below.</div>}
       {params.get('failed') && <div className="notice err" style={{ marginBottom: 16 }}>Payment did not go through. You can retry below.</div>}
       {s.status === 'pending_approval' && <div className="notice info mb-4"><I.approve size={18} />Payment received – your booking is awaiting a quick approval by our team. You'll be notified once it's active.</div>}
       <PageHead title={`${s.plan} plan · #${s.id}`} sub={`${fmtDate(s.start_date)} → ${fmtDate(s.end_date)}${['active', 'paused'].includes(s.status) ? ` · ${s.remaining_days} days remaining` : ''}`}>
@@ -425,14 +466,14 @@ export function SubscriptionDetail() {
             <div className="panel-body">
               <div className="cal">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i} className="h">{d}</div>)}
                 {days.length > 0 && Array.from({ length: new Date(days[0].iso + 'T00:00:00').getDay() }).map((_, i) => <div key={'e' + i} />)}
-                {days.map((d) => <div key={d.iso} title={`${d.iso} ${d.status}`} className={`d ${d.status} ${d.today ? 'today' : ''}`}>{d.day}</div>)}
+                {days.map((d) => <div key={d.iso} title={`${d.iso} ${d.status}${d.extra ? ' + extra milk' : ''}`} className={`d ${d.status} ${d.today ? 'today' : ''} ${d.extra ? 'extra' : ''}`}>{d.day}</div>)}
               </div>
             </div>
           </div>
           <div className="panel">
             <div className="panel-head"><h3>Delivery history</h3></div>
             <div className="table-wrap"><table className="t"><thead><tr><th>Date</th><th>Status</th><th>Delivered by</th><th>Note</th></tr></thead><tbody>
-              {s.deliveries.slice().reverse().map((d) => <tr key={d.id}><td className="strong">{fmtDate(d.delivery_date)}</td><td><Status s={d.status} /></td><td>{d.staff || '—'}</td><td className="small">{d.note}</td></tr>)}
+              {s.deliveries.slice().reverse().map((d) => <tr key={d.id}><td className="strong">{fmtDate(d.delivery_date)}{d.items.some((i) => i.extra) && <div className="small" style={{ color: '#8A5A00' }}>+ {d.items.filter((i) => i.extra).map((i) => `${i.qty} × ${i.product} ${i.size}`).join(', ')}</div>}</td><td><Status s={d.status} /></td><td>{d.staff || '—'}</td><td className="small">{d.note}</td></tr>)}
             </tbody></table></div>
             {!s.deliveries.length && <div className="panel-body muted">Deliveries will appear here from {fmtDate(s.start_date)}.</div>}
           </div>
@@ -462,6 +503,7 @@ export function SubscriptionDetail() {
             {['completed', 'cancelled'].includes(s.status) && <Link to="/subscriptions" className="btn btn-navy">Renew / new plan</Link>}
             <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Skipped and paused days are added to the end of your plan. See our <Link to="/policy/refund">refund policy</Link>.</p>
           </div></div>
+          {(s.status === 'active' || s.addons?.length > 0) && <ExtraMilk s={s} reload={reload} />}
           {s.payments?.length > 0 && <div className="panel"><div className="panel-head"><h3>Payments</h3></div><table className="t"><tbody>{s.payments.map((p) => <tr key={p.id}><td>{fmtDate(p.created_at)}<div className="small">{p.transaction_id || p.provider_order_id}</div></td><td className="strong">{inr(p.amount)}</td><td><Status s={p.status} /></td></tr>)}</tbody></table></div>}
         </div>
       </div>
@@ -488,6 +530,82 @@ export function SubscriptionDetail() {
   )
 }
 
+function ExtraMilk({ s, reload }) {
+  const toast = useToast()
+  const nav = useNavigate()
+  const confirm = useConfirm()
+  const { data: products } = useFetch('/api/public/products')
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ date: '', variant_id: '', qty: 1 })
+  const [busy, setBusy] = useState(false)
+  const variants = useMemo(() => (products || []).flatMap((p) => p.variants.filter((v) => v.is_available !== false).map((v) => ({ ...v, product: p.name }))), [products])
+  const chosen = variants.find((v) => String(v.id) === String(form.variant_id))
+  const h = s.change_cutoff_hour ?? 21
+  const cutoff = `${(h % 12) || 12} ${h >= 12 ? 'PM' : 'AM'}`
+  const earliest = s.addon_earliest_date
+  const canAdd = s.status === 'active' && earliest && earliest <= s.end_date
+  const start = () => {
+    const def = s.items[0]?.variant_id
+    setForm({ date: earliest, variant_id: def || variants[0]?.id || '', qty: 1 }); setOpen(true)
+  }
+  const book = async () => {
+    setBusy(true)
+    try {
+      const r = await api.post(`/api/me/subscriptions/${s.id}/addons`, { ...form, qty: Number(form.qty) })
+      nav(`/pay/${r.payment.provider_order_id}`)
+    } catch (e) { toast.error(e) } finally { setBusy(false) }
+  }
+  const cancel = async (a) => {
+    if (!(await confirm({ title: 'Cancel extra milk?', message: `${a.qty} × ${a.product} ${a.size} on ${fmtDate(a.delivery_date)}.${a.status === 'confirmed' ? ' The amount will be refunded.' : ''}`, confirmLabel: 'Yes, cancel', danger: true }))) return
+    try { const r = await api.post(`/api/me/subscriptions/${s.id}/addons/${a.id}/cancel`); toast.success(r.message); reload() } catch (e) { toast.error(e) }
+  }
+  const open_ = (s.addons || []).filter((a) => ['confirmed', 'pending_payment'].includes(a.status))
+  const past = (s.addons || []).filter((a) => !['confirmed', 'pending_payment'].includes(a.status))
+  return (
+    <div className="panel">
+      <div className="panel-head"><h3>Extra milk</h3>{canAdd && <button className="btn btn-sm btn-gold" onClick={start}><I.plus size={15} /> Add extra</button>}</div>
+      <div className="panel-body">
+        <p className="muted" style={{ fontSize: 13, margin: '0 0 10px' }}>Guests coming? Order extra milk for a single day – delivered with your regular milk. Book before {cutoff} the previous day.</p>
+        {!open_.length && !past.length && <div className="muted small">No extra milk booked yet.</div>}
+        {open_.map((a) => (
+          <div key={a.id} className="addon-row">
+            <div><b>{fmtDate(a.delivery_date, { weekday: 'short', day: 'numeric', month: 'short' })}</b><div className="small">{a.qty} × {a.product} {a.size} · {inr(a.amount)}</div></div>
+            <div className="addon-actions">
+              <Status s={a.status} />
+              {a.status === 'pending_payment' && a.provider_order_id && <Link className="btn btn-sm btn-navy" to={`/pay/${a.provider_order_id}`}>Pay</Link>}
+              {a.delivery_date >= earliest && <button className="btn btn-sm btn-ghost" onClick={() => cancel(a)}>Cancel</button>}
+            </div>
+          </div>
+        ))}
+        {past.length > 0 && <details className="mt-2"><summary className="small muted" style={{ cursor: 'pointer' }}>Past / cancelled ({past.length})</summary>
+          {past.map((a) => <div key={a.id} className="addon-row"><div className="small">{fmtDate(a.delivery_date)} · {a.qty} × {a.product} {a.size} · {inr(a.amount)}</div><Status s={a.status} /></div>)}
+        </details>}
+      </div>
+      {open && (
+        <Modal title="Add extra milk for one day" onClose={() => setOpen(false)}>
+          <Field label="Delivery date" id="xd" hint={`Earliest: ${fmtDate(earliest)} (orders close at ${cutoff} the previous day)`}>
+            <input id="xd" type="date" className="input" min={earliest} max={s.end_date} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          </Field>
+          <Field label="Milk" id="xv">
+            <select id="xv" className="input" value={form.variant_id} onChange={(e) => setForm({ ...form, variant_id: e.target.value })}>
+              {variants.map((v) => <option key={v.id} value={v.id}>{v.product} {v.label} – {inr(v.price)}</option>)}
+            </select>
+          </Field>
+          <Field label="Packets" id="xq">
+            <div className="qty-row">
+              <button type="button" className="btn btn-sm btn-outline" aria-label="Less" onClick={() => setForm({ ...form, qty: Math.max(1, Number(form.qty) - 1) })}>−</button>
+              <input id="xq" className="input" style={{ width: 70, textAlign: 'center' }} inputMode="numeric" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value.replace(/\D/g, '').slice(0, 2) })} />
+              <button type="button" className="btn btn-sm btn-outline" aria-label="More" onClick={() => setForm({ ...form, qty: Math.min(10, Number(form.qty || 0) + 1) })}>+</button>
+            </div>
+          </Field>
+          {chosen && Number(form.qty) > 0 && <div className="notice info mb-3">Total: <b>{inr(chosen.price * Number(form.qty))}</b> for {form.qty} × {chosen.product} {chosen.label} on {form.date ? fmtDate(form.date) : '—'}</div>}
+          <button className="btn btn-navy btn-block" disabled={busy || !form.date || !form.variant_id || !Number(form.qty)} onClick={book}>{busy && <Spinner />} Continue to payment</button>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 /* ================================================================ deliveries, payments, notifications */
 export function Orders() {
   const { data, loading } = useFetch('/api/me/orders')
@@ -501,7 +619,7 @@ export function Orders() {
               <tr key={o.id}>
                 <td className="strong">{o.subscription_id ? <Link to={`/account/subscriptions/${o.subscription_id}`}>{o.order_number}</Link> : o.order_number}</td>
                 <td className="small">{fmtDateTime(o.created_at)}</td>
-                <td>{o.plan?.name}</td>
+                <td>{o.kind === 'addon' ? <>Extra milk<div className="small">{fmtDate(o.addon_date)}</div></> : o.plan?.name}</td>
                 <td className="small">{o.items.map((i) => `${i.daily_qty}× ${i.product} ${i.size}`).join(', ')}</td>
                 <td className="strong">{o.total ? inr(o.total) : 'Free'}{o.discount > 0 && <div className="small">saved {inr(o.discount)}</div>}</td>
                 <td>{o.payment_status ? <Status s={o.payment_status === 'free' ? 'confirmed' : o.payment_status} /> : '—'}</td>
@@ -558,8 +676,8 @@ function Receipt({ r }) {
   const { payment: p, order: o, customer: c } = r
   return (
     <div className="receipt">
-      <div className="rh"><div><b className="serif" style={{ fontSize: 20, color: 'var(--navy)' }}>Aditya Milk Dairy</b><div className="muted" style={{ fontSize: 12 }}>Vijayawada, Andhra Pradesh</div></div><div style={{ textAlign: 'right' }}><b>Receipt {p.receipt_number}</b><div className="muted" style={{ fontSize: 12 }}>{fmtDateTime(p.updated_at)}</div></div></div>
-      <dl className="kv"><dt>Billed to</dt><dd>{c.name}<br />{c.phone} · {c.email}</dd><dt>Order</dt><dd>{o.order_number}</dd><dt>Plan</dt><dd>{o.plan?.name} ({o.plan?.duration_days} days)</dd><dt>Transaction</dt><dd>{p.transaction_id} · {p.method}</dd><dt>Deliver to</dt><dd>{o.address?.full}</dd></dl>
+      <div className="rh"><div><b className="serif" style={{ fontSize: 20, color: 'var(--navy)' }}>Aditya Milk Dairy</b><div className="muted" style={{ fontSize: 12 }}>Narasaraopet, Andhra Pradesh</div></div><div style={{ textAlign: 'right' }}><b>Receipt {p.receipt_number}</b><div className="muted" style={{ fontSize: 12 }}>{fmtDateTime(p.updated_at)}</div></div></div>
+      <dl className="kv"><dt>Billed to</dt><dd>{c.name}<br />{c.phone} · {c.email}</dd><dt>Order</dt><dd>{o.order_number}</dd><dt>{o.kind === 'addon' ? 'For' : 'Plan'}</dt><dd>{o.kind === 'addon' ? `Extra milk on ${fmtDate(o.addon_date)}` : `${o.plan?.name} (${o.plan?.duration_days} days)`}</dd><dt>Transaction</dt><dd>{p.transaction_id} · {p.method}</dd><dt>Deliver to</dt><dd>{o.address?.full}</dd></dl>
       <table className="t" style={{ marginTop: 14 }}><thead><tr><th>Item</th><th>Qty/day</th><th>Days</th><th>Rate</th><th>Amount</th></tr></thead><tbody>
         {o.items.map((i) => <tr key={i.variant_id}><td>{i.product} {i.size}</td><td>{i.daily_qty}</td><td>{i.days}</td><td>{inr(i.unit_price)}</td><td>{inr(i.line_total)}</td></tr>)}
         <tr><td colSpan={4}>Subtotal</td><td>{inr(o.subtotal)}</td></tr>
@@ -598,7 +716,7 @@ export function Profile() {
   const { data: me } = useFetch('/api/auth/me')
   const [f, setF] = useState(null)
   const [pw, setPw] = useState({ current_password: '', new_password: '', confirm: '' })
-  useEffect(() => { if (me) setF({ full_name: me.name, phone: me.phone || '', alt_phone: me.profile?.alt_phone || '', preferred_time: me.profile?.preferred_time || '' }) }, [me])
+  useEffect(() => { if (me) setF({ full_name: me.name, phone: me.phone || '', alt_phone: me.profile?.alt_phone || '', preferred_time: me.profile?.preferred_time || '', whatsapp_opt_in: me.profile?.whatsapp_opt_in !== false }) }, [me])
   const save = async (e) => { e.preventDefault(); try { const u = await api.put('/api/me/profile', f); setUser({ ...user, ...u }); toast.success('Profile updated') } catch (e2) { toast.error(e2) } }
   const change = async (e) => {
     e.preventDefault()
@@ -618,6 +736,7 @@ export function Profile() {
             <Field label="Alternate mobile" id="p-a"><input id="p-a" className="input" value={f.alt_phone} onChange={(e) => setF({ ...f, alt_phone: e.target.value })} /></Field>
           </div>
           <Field label="Preferred delivery window" id="p-t"><select id="p-t" className="input" value={f.preferred_time} onChange={(e) => setF({ ...f, preferred_time: e.target.value })}><option>5:30 AM - 6:30 AM</option><option>6:00 AM - 8:00 AM</option><option>6:30 AM - 7:30 AM</option><option>7:00 AM - 8:00 AM</option></select></Field>
+          <label className="check" style={{ marginBottom: 14 }}><input type="checkbox" checked={f.whatsapp_opt_in} onChange={(e) => setF({ ...f, whatsapp_opt_in: e.target.checked })} /> Send me delivery &amp; payment updates on WhatsApp</label>
           <button className="btn btn-navy">Save changes</button>
         </form></div>
         <div className="panel"><div className="panel-head"><h3>Change password</h3></div><form className="panel-body" onSubmit={change}>
@@ -633,6 +752,7 @@ export function Profile() {
 
 export function Support() {
   const { data, loading, reload } = useFetch('/api/me/support')
+  const { business: b } = useSite()
   const { user } = useAuth()
   const toast = useToast()
   const [f, setF] = useState({ kind: 'support', subject: '', message: '' })
@@ -643,7 +763,9 @@ export function Support() {
   }
   return (
     <>
-      <PageHead title="Help & Support" sub="Raise an enquiry or complaint – our team replies here and by email." />
+      <PageHead title="Help & Support" sub="Raise an enquiry or complaint – our team replies here and by email.">
+        {waLink(b?.whatsapp) && <a className="btn btn-outline wa-btn" href={waLink(b.whatsapp, `Hi, I'm ${user.name} (${user.phone || user.email}). I need help with my milk subscription.`)} target="_blank" rel="noreferrer"><I.whatsapp width={17} height={17} /> Chat on WhatsApp</a>}
+      </PageHead>
       <div className="cols-2">
         <div className="panel"><div className="panel-head"><h3>My tickets</h3></div>
           {loading ? <SkeletonRows /> : !data.length ? <Empty icon="chat" title="No tickets yet" /> : data.map((t) => (

@@ -64,3 +64,10 @@ export const fmtDateTime = (d) => d ? new Date(d + (d.endsWith('Z') ? '' : 'Z'))
 export const isoDate = (d) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10) }
 export const addDays = (n, from = new Date()) => { const d = new Date(from); d.setDate(d.getDate() + n); return isoDate(d) }
 export const todayISO = () => isoDate(new Date())
+/** WhatsApp click-to-chat link (free, no API needed). Indian 10-digit numbers get the 91 prefix. */
+export const waLink = (phone, text = '') => {
+  const d = String(phone || '').replace(/\D/g, '')
+  if (!d) return null
+  const num = d.length === 10 ? '91' + d : d
+  return `https://wa.me/${num}${text ? `?text=${encodeURIComponent(text)}` : ''}`
+}

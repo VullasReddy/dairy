@@ -47,6 +47,12 @@ Recommended free setup: **Render** (hosting) + **Supabase** (PostgreSQL database
 3. When the domain shows "Verified" (HTTPS is automatic), update `FRONTEND_URL` and `CORS_ORIGINS` to `https://yourdomain.com`.
 4. Submit `https://yourdomain.com/sitemap.xml` in Google Search Console.
 
+## 6b. WhatsApp, SMS and OTP login (optional)
+- **WhatsApp updates** (Meta WhatsApp Cloud API): create a WhatsApp Business app at developers.facebook.com, then set `WHATSAPP_PROVIDER=meta`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` in Render. Get a *Utility* template approved with one body variable `{{1}}` and set its name as `WHATSAPP_TEMPLATE`. Then tick **Admin → Settings → Send updates on WhatsApp** and use **Send test** on the same page. Customers can switch WhatsApp updates off in their Profile.
+- **OTP login:** works out of the box by **email** once SMTP is set (e.g. your Hostinger mailbox: `SMTP_HOST=smtp.hostinger.com`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`). For codes on the phone add either an SMS provider (`SMS_PROVIDER=fast2sms` + `FAST2SMS_API_KEY`, or `SMS_PROVIDER=msg91` + `MSG91_AUTH_KEY` + `MSG91_TEMPLATE_ID`) or an approved WhatsApp *Authentication* template (`WHATSAPP_OTP_TEMPLATE`). Admin accounts always log in with a password.
+- **Click-to-chat** WhatsApp buttons (staff app, admin bookings, customer support) need no setup – they use the WhatsApp number in Admin → Settings.
+- **Map pins** use OpenStreetMap – no API key. The delivery staff "Navigate" button opens Google Maps at the customer's pin.
+
 ## 7. Daily routine
 - Every morning: **Admin → Dashboard → Generate today's deliveries**, then share the sheet or the staff app (`/staff`) with your delivery team.
 - Watch **Bookings → Awaiting approval / Skip requests**, **Payments** and **Enquiries**.

@@ -18,9 +18,9 @@ from app.models import (AdminPermission, ADMIN_MODULES, User, CustomerProfile, A
 from app.utils import set_content, today, gen_code
 
 SETTINGS = {
-    "business_name": "Aditya Milk Dairy", "phone": "+91 98765 43210", "email": "info@adityamilkdairy.com",
-    "whatsapp": "919876543210", "address": "Aditya Milk Dairy Farms, Vijayawada, Andhra Pradesh",
-    "city": "Vijayawada · Hyderabad · Bengaluru · Chennai",
+    "business_name": "Aditya Milk Dairy", "phone": "+91 98765 43210", "email": "puritfarms@gmail.com",
+    "whatsapp": "919876543210", "address": "Aditya Milk Dairy Farms, Narasaraopet, Andhra Pradesh",
+    "city": "Narasaraopet · Vijayawada · Hyderabad · Bengaluru · Chennai",
     "delivery_timings": "5:30 AM – 8:00 AM daily", "order_cutoff": "Book by 8 PM for next-morning delivery",
     "social": {"facebook": "", "instagram": "", "youtube": ""},  # set real page URLs in Admin -> Settings
     "max_daily_qty": 10, "max_skips_per_subscription": 5, "max_pause_days": 15, "reminder_days_before": 2,
@@ -30,6 +30,7 @@ SETTINGS = {
     "payment_instructions": "Pay the amount by UPI to the ID shown, or in cash to our delivery partner on your first "
                             "delivery. Your plan is confirmed as soon as our team verifies the payment.",
     "location_radius_km": 50,
+    "change_cutoff_hour": 21,  # extra milk / changes for tomorrow close at 9 PM
 }
 
 HERO = {"eyebrow": "Pure. Fresh. Healthy.", "title": "Aditya Milk Dairy",
@@ -42,7 +43,7 @@ ABOUT = {"title": "About Aditya Milk Dairy",
                  "With **advanced dairy practices** and stringent quality checks, we ensure every drop is "
                  "nutritious, safe and wholesome.",
          "mission": "To make pure, farm-fresh milk a dependable part of every family's morning – delivered on time, every day.",
-         "farm": "Our cows and buffaloes are raised on green pastures on the outskirts of Vijayawada, with clean "
+         "farm": "Our cows and buffaloes are raised on green pastures on the outskirts of Narasaraopet, with clean "
                  "sheds, balanced feed, fresh water and regular veterinary care.",
          "values": ["Purity without compromise", "Kindness to our animals", "Hygiene at every step",
                     "On-time, every time"],
@@ -72,8 +73,7 @@ TRUST = [
 ]
 FAQS = [
     {"q": "What time is milk delivered?", "a": "Deliveries reach you between 5:30 AM and 8:00 AM every day.", "cat": "Delivery"},
-    {"q": "Which areas do you deliver to?", "a": "We deliver in Vijayawada, Hyderabad, Bengaluru and Chennai across selected PIN codes. Enter your PIN code on the Subscriptions page to check.", "cat": "Delivery"},
-    {"q": "How does the free trial work?", "a": "Every new customer can claim one free 1-day trial of up to 2 packets. Just choose the Free Trial plan at checkout – no payment needed.", "cat": "Subscriptions"},
+    {"q": "Which areas do you deliver to?", "a": "We deliver in Narasaraopet, Vijayawada, Hyderabad, Bengaluru and Chennai across selected PIN codes. Enter your PIN code on the Subscriptions page to check.", "cat": "Delivery"},
     {"q": "Can I skip a day or pause my plan?", "a": "Yes. Skip individual days or pause from My Subscriptions. Skipped and paused days are added to the end of your plan.", "cat": "Subscriptions"},
     {"q": "How is the price calculated?", "a": "Total = price per packet × packets per day × number of days, minus any plan discount. The exact total is shown before you pay.", "cat": "Payments"},
     {"q": "What payment methods do you accept?", "a": "UPI, cards, net banking and wallets through our secure payment gateway.", "cat": "Payments"},
@@ -88,13 +88,17 @@ FAQS = [
 ]
 POLICIES = {
     "privacy": {"title": "Privacy Policy", "body": "We collect your name, phone number, email and delivery address only to deliver your orders and contact you about them. Payment details are processed by our payment gateway and are never stored on our servers. We do not sell your data. You may request deletion of your account by contacting us."},
-    "terms": {"title": "Terms & Conditions", "body": "Subscriptions are confirmed only after successful advance payment (except the free trial). Deliveries are made to the selected address within published delivery timings. Customers must ensure someone is available or a safe drop point is provided. Prices may change for new subscriptions; active paid subscriptions keep the price at which they were booked."},
-    "refund": {"title": "Cancellation & Refund Policy", "body": "You may cancel an active subscription at any time. The value of undelivered days is refunded to the original payment method within 5–7 working days. Skipped days and paused days are added to the end of the plan instead of refunded. Missed deliveries caused by us are made up with an extra day at the end of the plan. Free trials are not refundable."},
+    "terms": {"title": "Terms & Conditions", "body": "Subscriptions are confirmed only after successful advance payment. Deliveries are made to the selected address within published delivery timings. Customers must ensure someone is available or a safe drop point is provided. Prices may change for new subscriptions; active paid subscriptions keep the price at which they were booked."},
+    "delivery": {"title": "Delivery Information", "body": "We deliver fresh milk every morning between 5:30 AM and 8:00 AM in our service areas of Narasaraopet, Vijayawada, Hyderabad, Bengaluru and Chennai. Delivery is free. Your first delivery is the morning after your booking is confirmed. Changes such as skipping a day, pausing or ordering extra milk must be made before the cut-off time the previous evening. If no one is home, our delivery partner leaves the milk at your safe drop point or follows your delivery instructions. Track every delivery from My Subscriptions."},
+    "refund": {"title": "Cancellation & Refund Policy", "body": "You may cancel an active subscription at any time. The value of undelivered days is refunded to the original payment method within 5–7 working days. Skipped days and paused days are added to the end of the plan instead of refunded. Missed deliveries caused by us are made up with an extra day at the end of the plan."},
 }
 
 # Delivery cities -> (PIN code, area). Confirm the exact serviceable PIN codes with the business before launch;
 # more can be added any time in Admin -> Settings -> Serviceable areas.
 LOCATIONS = {
+    "Narasaraopet": [("522601", "Narasaraopet Town"), ("522603", "Kakani / Ikkurru"), ("522611", "Gonepudi"),
+                     ("522616", "Chilakaluripet"), ("522617", "Rompicherla"), ("522619", "Nadendla"),
+                     ("522626", "Boppudi")],
     "Vijayawada": [("520001", "Governorpet"), ("520002", "One Town"), ("520003", "Krishna Lanka"),
                    ("520007", "Patamata"), ("520008", "Benz Circle"), ("520010", "Labbipet"),
                    ("520012", "Gunadala"), ("520013", "Ajit Singh Nagar"), ("520015", "Poranki")],
@@ -109,7 +113,13 @@ LOCATIONS = {
 }
 from app.locations import CITIES  # noqa: E402  (location-picker cities, see app/locations.py)
 
-CITY_ROUTES = {  # city -> [(route name, [pins])]; Vijayawada routes are created with their staff below
+# every PIN code of the four cities (India Post directory); hand-picked area names above win
+from app.pincodes import PINCODES  # noqa: E402
+for _city, _rows in PINCODES.items():
+    _have = {p for p, _ in LOCATIONS.setdefault(_city, [])}
+    LOCATIONS[_city] += [(p, a) for p, a in _rows if p not in _have]
+
+CITY_ROUTES = {  # city -> [(route name, [pins])]; Narasaraopet routes are created with their staff below
     "Hyderabad": [("Hyderabad – West", ["500032", "500033", "500034", "500081", "500072"]),
                   ("Hyderabad – Central", ["500003", "500016"])],
     "Bengaluru": [("Bengaluru – South & East", ["560011", "560034", "560078", "560102", "560037", "560066"]),
@@ -222,7 +232,7 @@ def seed(demo=True):
         ])
 
         plans = [
-            SubscriptionPlan(code="TRIAL", name="Free Trial", duration_days=1, is_trial=True, trial_max_packets=2,
+            SubscriptionPlan(code="TRIAL", name="Free Trial", duration_days=1, is_trial=True, trial_max_packets=2, is_active=False,
                              sort_order=0, description="One free day for new customers"),
             SubscriptionPlan(code="WEEKLY", name="7 Days", duration_days=7, discount_percent=0, sort_order=1,
                              description="Weekly plan"),
@@ -252,10 +262,10 @@ def seed(demo=True):
             db.session.add_all([st1, st2])
             db.session.flush()
         db.session.add_all([
-            DeliveryRoute(name="Vijayawada – Route A Central", area="Governorpet / One Town / Labbipet",
-                          pincodes=["520001", "520002", "520010", "520003"], default_staff_id=st1.id if st1 else None),
-            DeliveryRoute(name="Vijayawada – Route B East", area="Benz Circle / Patamata / Gunadala",
-                          pincodes=["520007", "520008", "520012", "520013", "520015"],
+            DeliveryRoute(name="Narasaraopet – Route A Town", area="Narasaraopet / Kakani / Rompicherla",
+                          pincodes=["522601", "522603", "522617"], default_staff_id=st1.id if st1 else None),
+            DeliveryRoute(name="Narasaraopet – Route B Outskirts", area="Chilakaluripet / Nadendla / Gonepudi / Boppudi",
+                          pincodes=["522616", "522619", "522611", "522626"],
                           default_staff_id=st2.id if st2 else None),
         ])
 
@@ -296,11 +306,57 @@ def ensure_locations():
             if not DeliveryRoute.query.filter_by(name=name).first():
                 db.session.add(DeliveryRoute(name=name, area=city, pincodes=pins))
     from app.models import WebsiteContent
+    # free trial is switched off
+    for pl in SubscriptionPlan.query.filter_by(is_trial=True, is_active=True).all():
+        pl.is_active = False
+    for key in ("faqs",):
+        row = WebsiteContent.query.filter_by(key=key).first()
+        if row and row.value:
+            row.value = [f for f in row.value if "free trial" not in f.get("q", "").lower()]
+    pol = WebsiteContent.query.filter_by(key="policies").first()
+    if pol and pol.value:
+        v = {k: dict(x) for k, x in pol.value.items()}
+        for x in v.values():
+            x["body"] = x.get("body", "").replace(" (except the free trial)", "").replace(" Free trials are not refundable.", "")
+        pol.value = v
     if not WebsiteContent.query.filter_by(key="locations").first():
         set_content("locations", CITIES)
     cfg = WebsiteContent.query.filter_by(key="settings").first()
     if cfg and (cfg.value or {}).get("city") == "Vijayawada":
         cfg.value = {**cfg.value, "city": SETTINGS["city"]}
+    # Narasaraopet added (Vijayawada kept); business email
+    import json as _json
+    for row in ServiceablePincode.query.filter_by(city="Vijayawada", is_active=False).all():
+        row.is_active = True
+    for r in DeliveryRoute.query.filter(DeliveryRoute.name.like("Vijayawada%"), DeliveryRoute.is_active.is_(False)).all():
+        r.is_active = True
+    for name, area, pins in (("Narasaraopet – Route A Town", "Narasaraopet / Kakani / Rompicherla", ["522601", "522603", "522617"]),
+                             ("Narasaraopet – Route B Outskirts", "Chilakaluripet / Nadendla / Gonepudi / Boppudi",
+                              ["522616", "522619", "522611", "522626"])):
+        if not DeliveryRoute.query.filter_by(name=name).first():
+            db.session.add(DeliveryRoute(name=name, area=area, pincodes=pins))
+    known = {c["name"]: c for c in CITIES}
+    for row in WebsiteContent.query.all():
+        raw = _json.dumps(row.value, ensure_ascii=False)
+        new = raw.replace("info@adityamilkdairy.com", "puritfarms@gmail.com")
+        if "Narasaraopet" not in new:
+            new = new.replace("Vijayawada · Hyderabad", "Narasaraopet · Vijayawada · Hyderabad") \
+                     .replace("Vijayawada, Hyderabad", "Narasaraopet, Vijayawada, Hyderabad")
+        elif "Vijayawada" not in new:  # an earlier version renamed Vijayawada -> Narasaraopet
+            new = new.replace("Narasaraopet · Hyderabad", "Narasaraopet · Vijayawada · Hyderabad") \
+                     .replace("Narasaraopet, Hyderabad", "Narasaraopet, Vijayawada, Hyderabad")
+        val = _json.loads(new)
+        if row.key == "locations" and isinstance(val, list):
+            names = [c.get("name") for c in val]
+            for n in ("Narasaraopet", "Vijayawada"):
+                if n not in names:
+                    val.insert(0 if n == "Narasaraopet" else 1, dict(known[n]))
+            val = [dict(known[c["name"]]) if c.get("name") in ("Narasaraopet", "Vijayawada") else c for c in val]
+        if new != raw or row.key == "locations":
+            row.value = val
+    pols = WebsiteContent.query.filter_by(key="policies").first()
+    if pols and pols.value is not None and "delivery" not in pols.value:
+        pols.value = {**pols.value, "delivery": POLICIES["delivery"]}
     faqs = WebsiteContent.query.filter_by(key="faqs").first()
     if faqs and faqs.value:
         faqs.value = [({**f, "a": next(x["a"] for x in FAQS if x["q"] == f["q"])}

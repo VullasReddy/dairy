@@ -62,8 +62,8 @@ export function Products() {
         </div>
         <div className="card reveal" style={{ marginTop: 26, display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
           <I.truck size={36} style={{ color: 'var(--navy)' }} />
-          <div style={{ flex: 1, minWidth: 240 }}><b className="serif" style={{ color: 'var(--navy)', fontSize: 18 }}>Not sure yet? Start with a free 1-day trial.</b><div className="muted">One free trial per customer · up to 2 packets · no payment needed.</div></div>
-          <Link to="/subscriptions" className="btn btn-gold">Claim Free Trial</Link>
+          <div style={{ flex: 1, minWidth: 240 }}><b className="serif" style={{ color: 'var(--navy)', fontSize: 18 }}>Fresh milk at your door before 8 AM.</b><div className="muted">Choose 7, 10, 15 or 30 days · skip, pause or add extra milk any time · free delivery.</div></div>
+          <Link to="/subscriptions" className="btn btn-gold">Start Subscription</Link>
         </div>
       </section></div>
     </>
@@ -244,7 +244,7 @@ export function Subscriptions() {
             <button className="btn btn-sm btn-outline" onClick={openPicker}>Change location</button>
           </div>
         )}
-        <SectionTitle title="1. Choose your plan" sub="Advance payment for paid plans · free 1-day trial for new customers" />
+        <SectionTitle title="1. Choose your plan" sub="Pay in advance · longer plans save more · free doorstep delivery" />
         <div className="plan-row reveal" style={{ maxWidth: 820, margin: '0 auto 34px' }}>
           {plans ? plans.map((p) => <PlanCard key={p.id} plan={p} selected={p.id === cart.cart.plan_id} onSelect={() => cart.setPlan(p.id)} />)
             : [0, 1, 2, 3, 4].map((i) => <Skeleton key={i} h={170} />)}
@@ -265,7 +265,7 @@ export function Subscriptions() {
             </div>
             <div className="card">
               <h3 style={{ fontSize: 18 }}>Check delivery availability</h3>
-              <p className="muted text-sm mt-0">We deliver in <b className="text-navy-ink">Vijayawada, Hyderabad, Bengaluru and Chennai</b>.</p>
+              <p className="muted text-sm mt-0">We deliver in <b className="text-navy-ink">Narasaraopet, Vijayawada, Hyderabad, Bengaluru and Chennai</b>.</p>
               <button type="button" className="gps-btn mb-3" onClick={useGps} disabled={gpsBusy}>
                 <span className="gps-ic">{gpsBusy ? <Spinner /> : <I.pin size={20} />}</span>
                 <span><b>Use my current location</b><small>{gpsBusy ? 'Detecting your location…' : 'Check instantly using GPS'}</small></span>

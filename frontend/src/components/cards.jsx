@@ -40,7 +40,7 @@ export function PlanCard({ plan, selected, onSelect, compact }) {
 export function TestimonialCard({ t }) {
   return (
     <figure className="testi" style={{ margin: 0 }}>
-      {t.avatar ? <img src={t.avatar} alt="" loading="lazy" /> : <div className="avatar">{t.name[0]}</div>}
+      <div className="avatar" aria-hidden="true">{t.name?.[0]}</div>
       <div>
         <Stars n={t.rating} />
         <blockquote style={{ margin: 0 }}><p>“{t.comment}”</p></blockquote>

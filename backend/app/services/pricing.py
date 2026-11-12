@@ -15,6 +15,9 @@ def is_serviceable(pincode):
 
 def trial_eligibility(user: User, phone=None):
     """One free trial per customer account AND per phone number."""
+    from ..models import SubscriptionPlan
+    if not SubscriptionPlan.query.filter_by(is_trial=True, is_active=True).first():
+        return {"eligible": False, "reason": "Free trial is not available right now."}
     if user is None:
         return {"eligible": True, "reason": None}
     if user.trial_used:

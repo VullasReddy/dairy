@@ -41,10 +41,12 @@ def j(r, code=200):
 def test_public_home(client):
     d = j(client.get("/api/public/home"))
     assert {p["slug"] for p in d["products"]} == {"cow-milk", "buffalo-milk"}
-    assert [p["duration_days"] for p in d["plans"]] == [1, 7, 10, 15, 30]
-    assert d["plans"][0]["from_price"] == 0 and d["plans"][1]["from_price"] == 280
+    assert d["plans"][0]["from_price"] == 280 and all(not p["is_trial"] for p in d["plans"])
+    assert j(client.get("/api/public/pincode/520008"))["city"] == "Vijayawada"
+    assert j(client.get("/api/public/pincode/560102"))["serviceable"] is True  # every city PIN, not just a few
+    assert j(client.get("/api/public/pincode/600119"))["city"] == "Chennai"
     assert len(d["testimonials"]) == 3
-    assert j(client.get("/api/public/pincode/520008"))["serviceable"] is True
+    assert j(client.get("/api/public/pincode/522601"))["serviceable"] is True
     assert j(client.get("/api/public/pincode/110001"))["serviceable"] is False
 
 
@@ -67,7 +69,7 @@ def test_full_paid_flow(client):
     far = j(client.post("/api/me/addresses", json={"line1": "1 Street", "pincode": "110001"}, headers=h), 201)
     assert far["serviceable"] is False
     addr = j(client.post("/api/me/addresses", json={"line1": "4-12 Main Rd", "area": "Patamata",
-                                                   "pincode": "520007"}, headers=h), 201)
+                                                   "pincode": "522616"}, headers=h), 201)
 
     plans = {p["code"]: p for p in j(client.get("/api/public/plans"))}
     cow = [p for p in j(client.get("/api/public/products")) if p["slug"] == "cow-milk"][0]
@@ -118,7 +120,7 @@ def test_full_paid_flow(client):
     ah = login(client, "admin@adityamilkdairy.com", "Admin@123")
     g = j(client.post("/api/admin/deliveries/generate", json={"date": TOMORROW}, headers=ah))
     assert g["created"] >= 1
-    rows = client.get(f"/api/admin/deliveries?date={TOMORROW}&pincode=520007", headers=ah).json
+    rows = client.get(f"/api/admin/deliveries?date={TOMORROW}&pincode=522616", headers=ah).json
     mine = [r for r in rows["data"] if r["subscription_id"] == sid][0]
     assert mine["status"] == "assigned" and mine["staff"] == "Suresh Babu"
     assert mine["items"][0]["qty"] == 2
@@ -165,9 +167,20 @@ def test_trial_rules(client):
     d = j(client.post("/api/auth/register", json={"full_name": "Trial User", "email": "trial@example.com",
                                                   "phone": "9988776655", "password": "Secret123"}), 201)
     h = {"Authorization": "Bearer " + d["token"]}
-    addr = j(client.post("/api/me/addresses", json={"line1": "7 Lane", "pincode": "520001"}, headers=h), 201)
-    plans = {p["code"]: p for p in j(client.get("/api/public/plans"))}
+    addr = j(client.post("/api/me/addresses", json={"line1": "7 Lane", "pincode": "522603"}, headers=h), 201)
+    # the free trial is switched off: hidden from the site and refused at checkout
+    assert "TRIAL" not in {p["code"] for p in j(client.get("/api/public/plans"))}
+    from app.models import SubscriptionPlan
+    from app.extensions import db
+    with client.application.app_context():
+        tid = SubscriptionPlan.query.filter_by(code="TRIAL").first().id
     v = j(client.get("/api/public/products"))[0]["variants"][0]
+    assert client.post("/api/me/checkout", json={"items": [{"variant_id": v["id"], "daily_qty": 1}], "plan_id": tid,
+                       "start_date": TOMORROW, "address_id": addr["id"]}, headers=h).status_code == 422
+    # if the owner switches it back on, the trial rules still hold
+    with client.application.app_context():
+        SubscriptionPlan.query.get(tid).is_active = True; db.session.commit()
+    plans = {p["code"]: p for p in j(client.get("/api/public/plans"))}
     # more than 2 packets not allowed on trial
     r = client.post("/api/me/checkout", json={"items": [{"variant_id": v["id"], "daily_qty": 3}],
                                               "plan_id": plans["TRIAL"]["id"], "start_date": TOMORROW,
@@ -179,6 +192,8 @@ def test_trial_rules(client):
     assert co["order"]["total"] == 0 and co["subscription"]["status"] == "active" and co["payment"] is None
     r = client.post("/api/me/checkout", json=body, headers=h)
     assert r.status_code == 422 and "already used" in r.json["error"]
+    with client.application.app_context():
+        SubscriptionPlan.query.get(tid).is_active = False; db.session.commit()
 
 
 def test_failed_payment_and_retry(client):
@@ -242,7 +257,7 @@ def test_contact_and_reviews(client):
     assert any(t["comment"] == "Lovely milk" for t in j(client.get("/api/public/testimonials")))
 
 
-def _book(client, h, milk_slug, qty, plan_code, pin="520010"):
+def _book(client, h, milk_slug, qty, plan_code, pin="522619"):
     addrs = j(client.get("/api/me/addresses", headers=h))
     addr = next((a for a in addrs if a["pincode"] == pin), None) or \
         j(client.post("/api/me/addresses", json={"line1": "9 Lane", "pincode": pin}, headers=h), 201)
@@ -376,7 +391,7 @@ def test_roles_crud_and_deletes(client):
     assert client.delete(f"/api/admin/plans/{weekly['id']}", headers=ah).status_code == 409
     np_ = j(client.post("/api/admin/plans", json={"code": "TEMP", "name": "Temp", "duration_days": 3}, headers=ah), 201)
     j(client.delete(f"/api/admin/plans/{np_['id']}", headers=ah))
-    pc = j(client.post("/api/admin/pincodes", json={"pincode": "520099", "area": "Test", "city": "Vijayawada"}, headers=ah), 201)
+    pc = j(client.post("/api/admin/pincodes", json={"pincode": "522699", "area": "Test", "city": "Narasaraopet"}, headers=ah), 201)
     j(client.delete(f"/api/admin/pincodes/{pc['id']}", headers=ah))
 
 
@@ -389,7 +404,7 @@ def test_staff_history(client):
 def test_location_picker(client):
     cities = j(client.get("/api/public/locations"))
     by = {c["name"]: c for c in cities}
-    assert all(by[c]["available"] for c in ("Vijayawada", "Hyderabad", "Bengaluru", "Chennai"))
+    assert all(by[c]["available"] for c in ("Narasaraopet", "Vijayawada", "Hyderabad", "Bengaluru", "Chennai"))
     assert by["Mumbai"]["available"] is False and by["Guntur"]["available"] is False
     assert cities[0]["available"] and not cities[-1]["available"]  # available cities listed first
     r = j(client.get("/api/public/locate?lat=12.93&lng=77.62"))  # Koramangala
@@ -397,7 +412,7 @@ def test_location_picker(client):
     r = j(client.get("/api/public/locate?lat=19.07&lng=72.88"))  # Mumbai
     assert r["city"]["name"] == "Mumbai" and not r["city"]["available"]
     assert r["nearest_available"]["name"] in ("Hyderabad", "Bengaluru")
-    r = j(client.get("/api/public/locate?lat=16.30&lng=80.44"))  # Guntur: close to Vijayawada but its own city
+    r = j(client.get("/api/public/locate?lat=16.30&lng=80.44"))  # Guntur: close to Narasaraopet but its own city
     assert r["city"]["name"] == "Guntur" and not r["city"]["available"]
     r = j(client.get("/api/public/locate?lat=25.0&lng=75.0"))  # somewhere with no city nearby
     assert r["city"] is None and r["nearest_available"]
@@ -422,7 +437,7 @@ def test_rate_limit_on_login():
 def test_multi_city_service_areas(client):
     areas = j(client.get("/api/public/service-areas"))
     cities = {a["city"] for a in areas}
-    assert {"Vijayawada", "Hyderabad", "Bengaluru", "Chennai"} <= cities
+    assert {"Narasaraopet", "Vijayawada", "Hyderabad", "Bengaluru", "Chennai"} <= cities
     r = j(client.get("/api/public/pincode/560034"))
     assert r["serviceable"] and r["city"] == "Bengaluru" and r["area"] == "Koramangala"
     # an address in Chennai gets its city from the serviceable area and can be booked
@@ -469,3 +484,171 @@ def test_offline_upi_payment_flow(client):
         assert len(sub["payments"]) == 1 and sub["payments"][0]["status"] == "success"  # reserved payment reused
     finally:
         app.config["PAYMENT_PROVIDER"] = "mock"
+
+
+def test_extra_milk_addon(client):
+    ah = login(client, "admin@adityamilkdairy.com", "Admin@123")
+    j(client.put("/api/admin/settings", json={"change_cutoff_hour": 23}, headers=ah))
+    h = _new_customer(client, "extra@example.com", "9700000088")
+    co, v = _book(client, h, "cow-milk", 1, "MONTHLY")
+    j(client.post(f"/api/me/payments/mock/{co['payment']['provider_order_id']}", json={"outcome": "success"}, headers=h))
+    sid = co["subscription"]["id"]
+    sub = j(client.get(f"/api/me/subscriptions/{sid}", headers=h))
+    day = sub["addon_earliest_date"]
+    later = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    buf = [p for p in j(client.get("/api/public/products")) if p["slug"] == "buffalo-milk"][0]["variants"][0]
+
+    # validation: past date, bad qty
+    assert client.post(f"/api/me/subscriptions/{sid}/addons", json={"date": biz_today().isoformat(),
+                       "variant_id": buf["id"], "qty": 1}, headers=h).status_code == 422
+    assert client.post(f"/api/me/subscriptions/{sid}/addons", json={"date": later, "variant_id": buf["id"],
+                       "qty": 0}, headers=h).status_code == 422
+
+    r = j(client.post(f"/api/me/subscriptions/{sid}/addons", json={"date": later, "variant_id": buf["id"], "qty": 2},
+                      headers=h), 201)
+    assert r["addon"]["amount"] == buf["price"] * 2 and r["addon"]["status"] == "pending_payment"
+    po = r["payment"]["provider_order_id"]
+    st = j(client.get(f"/api/me/payments/status/{po}", headers=h))
+    assert st["subscription"]["id"] == sid and st["order"]["kind"] == "addon"
+    j(client.post(f"/api/me/payments/mock/{po}", json={"outcome": "success"}, headers=h))
+    sub = j(client.get(f"/api/me/subscriptions/{sid}", headers=h))
+    assert sub["addons"][0]["status"] == "confirmed"
+    assert any(p["amount"] == buf["price"] * 2 and p["status"] == "success" for p in sub["payments"])
+
+    # that day's delivery carries the extra packets; skipping it is blocked
+    j(client.post("/api/admin/deliveries/generate", json={"date": later}, headers=ah))
+    row = [d for d in j(client.get(f"/api/me/subscriptions/{sid}", headers=h))["deliveries"]
+           if d["delivery_date"] == later][0]
+    assert any(i.get("extra") and i["qty"] == 2 for i in row["items"]) and len(row["items"]) == 2
+    assert client.post(f"/api/me/subscriptions/{sid}/skip", json={"date": later}, headers=h).status_code == 422
+
+    # customer cancels -> removed from the delivery, refund due recorded for admin
+    aid = sub["addons"][0]["id"]
+    j(client.post(f"/api/me/subscriptions/{sid}/addons/{aid}/cancel", headers=h))
+    sub = j(client.get(f"/api/me/subscriptions/{sid}", headers=h))
+    row = [d for d in sub["deliveries"] if d["delivery_date"] == later][0]
+    assert len(row["items"]) == 1 and sub["refund_due"] == buf["price"] * 2
+    assert sub["addons"][0]["status"] == "cancelled"
+
+    # offline: admin records the UPI payment for an extra-milk order
+    app = client.application
+    app.config["PAYMENT_PROVIDER"] = "offline"
+    try:
+        r = j(client.post(f"/api/me/subscriptions/{sid}/addons", json={"date": later, "variant_id": v["id"], "qty": 1},
+                          headers=h), 201)
+        aid = r["addon"]["id"]
+        j(client.post(f"/api/admin/subscriptions/{sid}/addons/{aid}/confirm-payment",
+                      json={"reference": "UPI 1234", "method": "upi"}, headers=ah))
+        d = j(client.get(f"/api/admin/subscriptions/{sid}", headers=ah))
+        assert [a for a in d["addons"] if a["id"] == aid][0]["status"] == "confirmed"
+    finally:
+        app.config["PAYMENT_PROVIDER"] = "mock"
+
+    # cut-off: at hour 0 every time is past the cut-off, so the earliest date moves to the day after tomorrow
+    j(client.put("/api/admin/settings", json={"change_cutoff_hour": 0}, headers=ah))
+    sub = j(client.get(f"/api/me/subscriptions/{sid}", headers=h))
+    assert sub["addon_earliest_date"] == (biz_today() + timedelta(days=2)).isoformat()
+    assert client.post(f"/api/me/subscriptions/{sid}/addons", json={"date": TOMORROW, "variant_id": v["id"], "qty": 1},
+                       headers=h).status_code == 422
+    j(client.put("/api/admin/settings", json={"change_cutoff_hour": 21}, headers=ah))
+
+
+def test_otp_login(client):
+    _new_customer(client, "otp@example.com", "9700000099")
+    r = j(client.post("/api/auth/otp/request", json={"identifier": "97000 00099"}))
+    code = r["dev_code"]
+    assert len(code) == 6 and r["resend_in"] == 30
+    # immediate resend is throttled
+    assert client.post("/api/auth/otp/request", json={"identifier": "9700000099"}).status_code == 429
+    # wrong code, then right code
+    wrong = "000000" if code != "000000" else "111111"
+    assert client.post("/api/auth/otp/verify", json={"identifier": "9700000099", "code": wrong}).status_code == 401
+    d = j(client.post("/api/auth/otp/verify", json={"identifier": "9700000099", "code": code}))
+    assert d["user"]["email"] == "otp@example.com" and d["token"]
+    # a code works only once
+    assert client.post("/api/auth/otp/verify", json={"identifier": "9700000099", "code": code}).status_code == 401
+    # unknown number / admin accounts
+    assert client.post("/api/auth/otp/request", json={"identifier": "9888877771"}).status_code == 404
+    assert client.post("/api/auth/otp/request", json={"identifier": "admin@adityamilkdairy.com"}).status_code == 404
+    assert client.post("/api/auth/otp/request", json={"identifier": "12345"}).status_code == 422
+
+
+def test_otp_attempt_limit(client):
+    from app.models import OtpCode
+    from app.extensions import db
+    _new_customer(client, "otp2@example.com", "9700000098")
+    code = j(client.post("/api/auth/otp/request", json={"identifier": "otp2@example.com"}))["dev_code"]
+    wrong = "000000" if code != "000000" else "111111"
+    for _ in range(5):
+        assert client.post("/api/auth/otp/verify", json={"identifier": "otp2@example.com", "code": wrong}).status_code == 401
+    # sixth try is refused even with the correct code
+    assert client.post("/api/auth/otp/verify", json={"identifier": "otp2@example.com", "code": code}).status_code == 401
+    # expired codes are refused
+    with client.application.app_context():
+        OtpCode.query.delete(); db.session.commit()
+    code = j(client.post("/api/auth/otp/request", json={"identifier": "otp2@example.com"}))["dev_code"]
+    with client.application.app_context():
+        from datetime import datetime
+        o = OtpCode.query.order_by(OtpCode.id.desc()).first(); o.expires_at = datetime(2000, 1, 1); db.session.commit()
+    assert client.post("/api/auth/otp/verify", json={"identifier": "otp2@example.com", "code": code}).status_code == 401
+
+
+def test_whatsapp_integration_and_opt_in(client):
+    ah = login(client, "admin@adityamilkdairy.com", "Admin@123")
+    st = j(client.get("/api/admin/integrations", headers=ah))
+    assert st["whatsapp"]["configured"] is False and st["payments"]["provider"] == "mock"
+    r = client.post("/api/admin/integrations/whatsapp-test", json={"phone": "9876543210"}, headers=ah)
+    assert r.status_code == 422 and "not set up" in r.json["error"]
+    h = _new_customer(client, "wa@example.com", "9700000066")
+    d = j(client.put("/api/me/profile", json={"whatsapp_opt_in": False}, headers=h))
+    assert d["profile"]["whatsapp_opt_in"] is False
+    # map pin stored with the address and turned into a directions link
+    a = j(client.post("/api/me/addresses", json={"line1": "7 Temple St", "pincode": "522619", "lat": 16.2349,
+                                                 "lng": 80.648}, headers=h), 201)
+    assert a["lat"] == 16.2349 and "destination=16.2349,80.648" in a["map_url"]
+    assert client.post("/api/me/addresses", json={"line1": "x", "pincode": "522619", "lat": 200, "lng": 1},
+                       headers=h).status_code == 422
+    a2 = j(client.put(f"/api/me/addresses/{a['id']}", json={"lat": None, "lng": None}, headers=h))
+    assert a2["lat"] is None and "destination=7+Temple" in a2["map_url"]
+
+
+def test_phone_only_account(client):
+    # email is optional – the mobile number is the login
+    d = j(client.post("/api/auth/register", json={"full_name": "Phone Only", "phone": "+91 97000 55555",
+                                                  "password": "Secret123"}), 201)
+    assert d["user"]["email"] is None and d["user"]["phone"] == "9700055555" and "dev_verify_token" not in d
+    for ident in ("9700055555", "+91 97000 55555", "097000-55555"):
+        assert j(client.post("/api/auth/login", json={"email": ident, "password": "Secret123"}))["token"]
+    assert client.post("/api/auth/login", json={"email": "9700055555", "password": "wrong"}).status_code == 401
+    # a second phone-only account works too (no unique-email clash)
+    j(client.post("/api/auth/register", json={"full_name": "Phone Two", "phone": "9700055556", "password": "Secret123"}), 201)
+    # forgot password without email: admin sets a new one
+    ah = login(client, "admin@adityamilkdairy.com", "Admin@123")
+    j(client.put(f"/api/admin/customers/{d['user']['id']}", json={"new_password": "NewPass123"}, headers=ah))
+    assert j(client.post("/api/auth/login", json={"email": "9700055555", "password": "NewPass123"}))["token"]
+    site = j(client.get("/api/public/site"))
+    assert site["otp_login"] is False and site["email_enabled"] is False
+
+
+def test_signup_phone_otp_when_sms_is_set_up(client, monkeypatch):
+    from app.services import messaging
+    sent = {}
+    monkeypatch.setattr(messaging, "send_sms_otp", lambda phone, code: sent.update(phone=phone, code=code) or True)
+    app = client.application
+    app.config.update(SMS_PROVIDER="fast2sms", FAST2SMS_API_KEY="test-key")
+    try:
+        assert j(client.get("/api/public/site"))["otp_login"] is True
+        body = {"full_name": "Otp Signup", "phone": "9700077777", "password": "Secret123"}
+        assert client.post("/api/auth/register", json=body).status_code == 422  # code required
+        r = j(client.post("/api/auth/register/send-otp", json={"phone": "97000 77777"}))
+        assert sent["phone"] == "9700077777" and "dev_code" not in r
+        wrong = "000000" if sent["code"] != "000000" else "111111"
+        assert client.post("/api/auth/register", json={**body, "otp_token": r["otp_token"], "otp": wrong}).status_code == 422
+        # a code for another number does not work
+        assert client.post("/api/auth/register", json={**body, "phone": "9700077778", "otp_token": r["otp_token"],
+                                                         "otp": sent["code"]}).status_code == 422
+        d = j(client.post("/api/auth/register", json={**body, "otp_token": r["otp_token"], "otp": sent["code"]}), 201)
+        assert d["user"]["phone"] == "9700077777"
+        assert client.post("/api/auth/register/send-otp", json={"phone": "9700077777"}).status_code == 409
+    finally:
+        app.config.update(SMS_PROVIDER="", FAST2SMS_API_KEY="")

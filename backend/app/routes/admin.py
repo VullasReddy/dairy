@@ -11,7 +11,7 @@ from flask import Blueprint, request, current_app, Response
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
 
-from ..extensions import db
+from ..extensions import db, limiter
 from ..models import (AdminPermission, ADMIN_MODULES, SubscriptionSkip, OrderItem, SubscriptionItem,
                       User, CustomerProfile, AdminRole, Address, Product, ProductVariant, SubscriptionPlan,
                       Subscription, Order, Payment, DeliverySchedule, DeliveryStaff, DeliveryRoute,
@@ -330,6 +330,11 @@ def update_customer(user, uid):
     u = get_or_404(User, uid, "Customer")
     p = request.get_json(force=True, silent=True) or {}
     assign(u, p, ("is_active", "trial_used", "email_verified"), user, "customer")
+    if p.get("new_password"):  # customer forgot password and has no email – admin sets a new one
+        from .auth import validate_password
+        validate_password(p["new_password"])
+        u.set_password(p["new_password"])
+        audit(user, "customer", u.id, "password_reset_by_admin", {})
     db.session.commit()
     return ok(u.to_dict())
 
@@ -360,6 +365,8 @@ def subscription(user, sid):
     d = s.to_dict()
     d["order"] = s.order.to_dict() if s.order else None
     d["payments"] = [p.to_dict() for p in (s.order.payments if s.order else [])]
+    d["payments"] += [pm.to_dict() for a in s.addons for pm in (a.order.payments if a.order else [])]
+    d["addons"] = [a.to_dict() for a in s.addons]
     d["deliveries"] = [r.to_dict() for r in DeliverySchedule.query.filter_by(subscription_id=sid)
                        .order_by(DeliverySchedule.delivery_date)]
     d["audit"] = [x.to_dict() for x in AuditLog.query.filter(
@@ -414,6 +421,39 @@ def subscription_action(user, sid, action):
         raise ApiError("Unknown action.", 404)
     db.session.commit()
     return ok(s.to_dict())
+
+
+@bp.post("/subscriptions/<int:sid>/addons/<int:aid>/<action>")
+@perm("bookings")
+def addon_action(user, sid, aid, action):
+    """Extra-milk orders: record a UPI / cash payment, or cancel."""
+    s = get_or_404(Subscription, sid, "Subscription")
+    addon = next((a for a in s.addons if a.id == aid), None)
+    if not addon:
+        raise ApiError("Extra milk order not found.", 404)
+    p = request.get_json(force=True, silent=True) or {}
+    if action == "confirm-payment":
+        require(p, "reference")
+        if addon.status != "pending_payment":
+            raise ApiError("This extra milk order is not awaiting payment.", 422)
+        pm = next((x for x in addon.order.payments if x.status == "created"), None)
+        if not pm:
+            pm = Payment(order_id=addon.order_id, user_id=s.user_id, amount=addon.amount, provider="offline",
+                         provider_order_id="offline_" + secrets.token_hex(6))
+            db.session.add(pm)
+            db.session.flush()
+            pm.order = addon.order
+        db.session.commit()
+        pay.mark_success(pm.provider_order_id, "offline_" + p["reference"][:60], p.get("method", "cash"))
+        audit(user, "subscription", s.id, "addon_offline_payment", {"addon": aid, "reference": p["reference"]})
+    elif action == "cancel":
+        paid = dsvc.cancel_addon(addon, user, by_admin=True)
+        notify(s.user, "Extra milk cancelled", f"Your extra milk for {addon.delivery_date:%d %b} was cancelled."
+               + (f" ₹{float(addon.amount):,.2f} will be refunded." if paid else ""), "subscription")
+    else:
+        raise ApiError("Unknown action.", 404)
+    db.session.commit()
+    return ok(addon.to_dict())
 
 
 # ======================================================================= deliveries
@@ -1086,6 +1126,57 @@ def put_settings(user):
     audit(user, "settings", None, "update", {"keys": list(p.keys())})
     db.session.commit()
     return ok(cur)
+
+
+@bp.get("/integrations")
+@perm("settings")
+def integrations(user):
+    """Which server-side integrations are configured (keys themselves are never returned)."""
+    from ..services.messaging import whatsapp_enabled, sms_enabled
+    cfg = current_app.config
+    return ok({
+        "whatsapp": {"configured": bool(whatsapp_enabled()), "template": cfg.get("WHATSAPP_TEMPLATE") or None,
+                     "otp_template": cfg.get("WHATSAPP_OTP_TEMPLATE") or None,
+                     "enabled": bool(settings().get("whatsapp_notifications"))},
+        "sms": {"configured": bool(sms_enabled()), "provider": cfg.get("SMS_PROVIDER") or None},
+        "email": {"configured": bool(cfg.get("SMTP_HOST"))},
+        "payments": {"provider": cfg.get("PAYMENT_PROVIDER")},
+    })
+
+
+@bp.post("/integrations/email-test")
+@limiter.limit("5 per minute")
+@perm("settings")
+def email_test(user):
+    from ..services.messaging import test_email
+    p = request.get_json(force=True, silent=True) or {}
+    to = (p.get("email") or user.email or "").strip()
+    if "@" not in to:
+        raise ApiError("Enter a valid email address.", 422, "email")
+    good, msg = test_email(to)
+    if not good:
+        raise ApiError(msg, 422)
+    return ok({"message": msg})
+
+
+@bp.post("/integrations/whatsapp-test")
+@limiter.limit("5 per minute")
+@perm("settings")
+def whatsapp_test(user):
+    from ..services.messaging import whatsapp_enabled, send_whatsapp
+    p = request.get_json(force=True, silent=True) or {}
+    phone = re.sub(r"\D", "", p.get("phone") or "")[-10:]
+    if not re.match(r"^[6-9]\d{9}$", phone):
+        raise ApiError("Enter a valid 10-digit mobile number.", 422, "phone")
+    if not whatsapp_enabled():
+        raise ApiError("WhatsApp is not set up on the server yet. Add WHATSAPP_PROVIDER=meta, WHATSAPP_TOKEN and "
+                       "WHATSAPP_PHONE_NUMBER_ID to the server environment.", 422)
+    if not send_whatsapp(phone, "Test message from Aditya Milk Dairy – WhatsApp updates are working."):
+        raise ApiError("WhatsApp did not accept the message. Check the token, phone number ID and template name "
+                       "(see the server log for details).", 502)
+    audit(user, "settings", None, "whatsapp_test", {"phone": phone[-4:]})
+    db.session.commit()
+    return ok({"message": "Test message sent. Check WhatsApp on that phone."})
 
 
 @bp.get("/admins")

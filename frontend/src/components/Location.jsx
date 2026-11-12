@@ -9,6 +9,7 @@ import { Modal, Spinner } from './ui'
    loc = { city, state, available, area?, pincode?, source: 'gps' | 'pin' | 'city' } */
 const LOC_KEY = 'amd_location'
 const Ctx = createContext(null)
+const NO_AUTO_ASK = /^\/(login|register|forgot-password|reset-password|verify-email|account|admin|staff|pay|checkout)(\/|$)/
 const read = () => { try { return JSON.parse(localStorage.getItem(LOC_KEY)) } catch { return null } }
 
 export function LocationProvider({ children }) {
@@ -19,8 +20,12 @@ export function LocationProvider({ children }) {
   useEffect(() => { loadCities() }, [loadCities])
   useEffect(() => {
     // First visit: ask for the location straight away (once per browser session)
+    // – only on shopping pages, never over login, account, admin or delivery-staff screens
     if (!loc && !sessionStorage.getItem('amd_loc_asked')) {
-      const t = setTimeout(() => { setOpen(true); sessionStorage.setItem('amd_loc_asked', '1') }, 700)
+      const t = setTimeout(() => {
+        if (NO_AUTO_ASK.test(window.location.pathname)) return
+        setOpen(true); sessionStorage.setItem('amd_loc_asked', '1')
+      }, 700)
       return () => clearTimeout(t)
     }
   }, [loc])

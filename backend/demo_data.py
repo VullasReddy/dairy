@@ -22,7 +22,7 @@ def seed_demo(staff):
     db.session.add(c)
     db.session.flush()
     addr = Address(user_id=c.id, label="Home", line1="Flat 302, Sai Residency", line2="MG Road",
-                   landmark="Benz Circle", area="Benz Circle", city="Vijayawada", pincode="520008",
+                   landmark="Clock Tower", area="Narasaraopet Town", city="Narasaraopet", pincode="522601",
                    instructions="Leave at the door, ring bell once", is_default=True)
     db.session.add(addr)
     db.session.flush()

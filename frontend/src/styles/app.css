@@ -125,3 +125,21 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 }
 .cols-2 > *, .cols-even > *, .content > * { min-width: 0; }
 .panel-head > * { min-width: 0; }
+
+/* extra milk */
+.cal .d.extra::after { content: ''; position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
+.addon-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #EEF2F6; flex-wrap: wrap; }
+.addon-row:first-of-type { border-top: 0; }
+.addon-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.qty-row { display: flex; gap: 8px; align-items: center; }
+.integ-row { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0; border-top: 1px solid #EEF2F6; }
+.integ-row:first-child { border-top: 0; }
+.integ-row .pill { flex-shrink: 0; min-width: 92px; justify-content: center; }
+.wa-inline { display: inline-flex; vertical-align: middle; margin-left: 6px; color: #1DA851; }
+.wa-btn svg { color: #1DA851; }
+/* map pin */
+.map-box { width: 100%; border-radius: 14px; overflow: hidden; border: 1px solid #DCE6EF; z-index: 0; }
+.map-pin span { display: block; width: 30px; height: 30px; border-radius: 50% 50% 50% 0; background: var(--navy, #073B70); transform: rotate(-45deg); border: 3px solid #fff; box-shadow: 0 3px 8px rgba(0,0,0,.35); }
+.map-pin span::after { content: ''; position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--gold, #E8B75C); top: 7px; left: 7px; }
+.pin-section { border: 1px dashed #BFD3E4; border-radius: 14px; padding: 12px; margin-bottom: 14px; background: #FBFDFF; }
+.pin-section .pin-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }

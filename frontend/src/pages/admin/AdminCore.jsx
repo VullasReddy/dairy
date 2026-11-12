@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { api, addDays, fmtDate, fmtDateTime, inr, todayISO } from '../../api'
+import { api, addDays, fmtDate, fmtDateTime, inr, todayISO, waLink } from '../../api'
 import { useFetch, useToast } from '../../context'
 import { I } from '../../components/Icons'
 import { Empty, ErrorBox, Field, Modal, Pager, SkeletonRows, Spinner, Status } from '../../components/ui'
@@ -214,11 +214,11 @@ export function BookingDetail() {
       <div className="cols-2">
         <div>
           <div className="panel"><div className="panel-head"><h3>Selection</h3></div><div className="panel-body"><dl className="kv">
-            <dt>Customer</dt><dd><Link to={`/admin/customers/${s.user_id}`}>{s.customer}</Link> · {s.customer_phone}</dd>
+            <dt>Customer</dt><dd><Link to={`/admin/customers/${s.user_id}`}>{s.customer}</Link> · <a href={`tel:${s.customer_phone}`}>{s.customer_phone}</a>{waLink(s.customer_phone) && <a className="wa-inline" href={waLink(s.customer_phone, `Hi ${s.customer.split(' ')[0]}, this is Aditya Milk Dairy about your booking #${s.id}.`)} target="_blank" rel="noreferrer" aria-label="WhatsApp customer"><I.whatsapp width={15} height={15} /></a>}</dd>
             <dt>Plan</dt><dd>{s.plan} ({s.duration_days} days){s.is_trial && ' · Free trial'}</dd>
             <dt>Milk / day</dt><dd>{s.items.map((i) => <div key={i.variant_id}>{i.daily_qty} × {i.product} {i.size} @ {inr(i.unit_price)}</div>)}</dd>
             <dt>Dates</dt><dd>{fmtDate(s.start_date)} → {fmtDate(s.end_date)}</dd>
-            <dt>Address</dt><dd>{s.address?.full}{s.address?.instructions && <div className="muted">“{s.address.instructions}”</div>}</dd>
+            <dt>Address</dt><dd>{s.address?.full}{s.address?.instructions && <div className="muted">“{s.address.instructions}”</div>}{s.address?.map_url && <div><a className="small" href={s.address.map_url} target="_blank" rel="noreferrer">{s.address.lat != null ? '📍 Open map pin' : 'Open in Google Maps'}</a></div>}</dd>
             <dt>Amount</dt><dd>{inr(s.total_amount)}{s.order && s.order.discount > 0 && <span className="muted"> (subtotal {inr(s.order.subtotal)} − {inr(s.order.discount)})</span>}</dd>
             {s.skip_requests.length > 0 && <><dt>Skip requests</dt><dd>{s.skip_requests.map((k) => <div key={k.id}>{fmtDate(k.date)} <Status s={k.status} /></div>)}</dd></>}
             {s.refund_due > 0 && <><dt>Refund due</dt><dd className="strong" style={{ color: 'var(--red)' }}>{inr(s.refund_due)} – process in Payments</dd></>}
@@ -231,6 +231,18 @@ export function BookingDetail() {
           </div>
         </div>
         <div>
+          {s.addons?.length > 0 && <div className="panel"><div className="panel-head"><h3>Extra milk ({s.addons.length})</h3></div>
+            <div className="table-wrap"><table className="t"><tbody>{s.addons.map((a) => (
+              <tr key={a.id}>
+                <td><b>{fmtDate(a.delivery_date)}</b><div className="small">{a.qty} × {a.product} {a.size} · {a.order_number}</div></td>
+                <td className="strong">{inr(a.amount)}</td>
+                <td><Status s={a.status} /></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {a.status === 'pending_payment' && <button className="btn btn-sm btn-gold" onClick={() => { setV({ reference: '', method: 'upi_direct', addon: a }); setModal('addon-pay') }}>Record payment</button>}{' '}
+                  {['pending_payment', 'confirmed'].includes(a.status) && <button className="btn btn-sm btn-ghost" onClick={async () => { try { await api.post(`/api/admin/subscriptions/${id}/addons/${a.id}/cancel`); toast.success('Extra milk cancelled'); reload() } catch (e) { toast.error(e) } }}>Cancel</button>}
+                </td>
+              </tr>))}</tbody></table></div>
+          </div>}
           <div className="panel"><div className="panel-head"><h3>Payments</h3></div>
             <table className="t"><tbody>{s.payments.map((p) => <tr key={p.id}><td className="small">{p.provider}<br />{p.transaction_id || p.provider_order_id}</td><td className="strong">{inr(p.amount)}</td><td><Status s={p.status} /></td></tr>)}</tbody></table>
             {!s.payments.length && <div className="panel-body muted">{s.is_trial ? 'Free trial – no payment.' : 'No payment attempts.'}</div>}
@@ -244,6 +256,7 @@ export function BookingDetail() {
       {modal === 'cancel' && <Modal title="Cancel booking" onClose={() => setModal(null)}><Field label="Reason" id="r"><textarea id="r" className="input" value={v.reason} onChange={(e) => setV({ reason: e.target.value })} /></Field><button className="btn btn-danger" onClick={() => act('cancel', v)}>Cancel booking</button></Modal>}
       {modal === 'reject' && <Modal title="Reject booking" onClose={() => setModal(null)}><div className="notice warn mb-3">The customer is notified and a full refund is marked as due in Payments.</div><Field label="Reason" id="rj"><textarea id="rj" className="input" value={v.reason} onChange={(e) => setV({ reason: e.target.value })} /></Field><button className="btn btn-danger" disabled={!v.reason} onClick={() => act('reject', v)}>Reject booking</button></Modal>}
       {modal === 'extend' && <Modal title="Extend plan" onClose={() => setModal(null)}><Field label="Days" id="d"><input id="d" type="number" min="1" max="30" className="input" value={v.days} onChange={(e) => setV({ ...v, days: e.target.value })} /></Field><Field label="Reason" id="er"><input id="er" className="input" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} /></Field><button className="btn btn-navy" onClick={() => act('extend', v)}>Extend</button></Modal>}
+      {modal === 'addon-pay' && <Modal title="Record extra milk payment" onClose={() => setModal(null)}><div className="notice info" style={{ marginBottom: 12 }}>{v.addon.qty} × {v.addon.product} {v.addon.size} on {fmtDate(v.addon.delivery_date)}</div><Field label="Method" id="am"><select id="am" className="input" value={v.method} onChange={(e) => setV({ ...v, method: e.target.value })}><option value="upi_direct">UPI (direct)</option><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option></select></Field><Field label="Reference / receipt no." id="ar"><input id="ar" className="input" value={v.reference} onChange={(e) => setV({ ...v, reference: e.target.value })} /></Field><button className="btn btn-navy" disabled={!v.reference} onClick={async () => { try { await api.post(`/api/admin/subscriptions/${id}/addons/${v.addon.id}/confirm-payment`, { reference: v.reference, method: v.method }); toast.success('Payment recorded'); setModal(null); reload() } catch (e) { toast.error(e) } }}>Confirm payment of {inr(v.addon.amount)}</button></Modal>}
       {modal === 'offline' && <Modal title="Record cash / bank payment" onClose={() => setModal(null)}><div className="notice info" style={{ marginBottom: 12 }}>Use only when money has been received outside the gateway. This is logged in the audit trail.</div><Field label="Method" id="om"><select id="om" className="input" value={v.method} onChange={(e) => setV({ ...v, method: e.target.value })}><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option><option value="upi_direct">UPI (direct)</option></select></Field><Field label="Reference / receipt no." id="or"><input id="or" className="input" value={v.reference} onChange={(e) => setV({ ...v, reference: e.target.value })} /></Field><button className="btn btn-navy" disabled={!v.reference} onClick={() => act('confirm-offline-payment', v)}>Confirm payment of {inr(s.total_amount)}</button></Modal>}
     </>
   )
@@ -332,9 +345,9 @@ export function Deliveries() {
               <tr key={r.id}>
                 <td className="no-print"><input type="checkbox" checked={sel.includes(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${r.customer}`} /></td>
                 <td className="small">{r.route || <span className="pill amber">No route</span>}</td>
-                <td className="strong">{r.customer}<div className="small"><a href={`tel:${r.phone}`}>{r.phone}</a></div></td>
+                <td className="strong">{r.customer}<div className="small"><a href={`tel:${r.phone}`}>{r.phone}</a>{waLink(r.phone) && <a className="wa-inline no-print" href={waLink(r.phone)} target="_blank" rel="noreferrer" title="WhatsApp" aria-label={`WhatsApp ${r.customer}`}><I.whatsapp width={15} height={15} /></a>}</div>{r.lat != null && <a className="small no-print" href={r.map_url} target="_blank" rel="noreferrer">📍 map pin</a>}</td>
                 <td className="small" style={{ maxWidth: 240 }}>{r.address}</td>
-                <td>{r.items.map((i, k) => <div key={k} style={{ fontSize: 13 }}><b>{i.qty}</b> × {i.product} {i.size}</div>)}</td>
+                <td>{r.items.map((i, k) => <div key={k} style={{ fontSize: 13 }}><b>{i.qty}</b> × {i.product} {i.size}{i.extra && <span className="pill gold" style={{ marginLeft: 6, fontSize: 10.5 }}>EXTRA</span>}</div>)}</td>
                 <td className="small" style={{ maxWidth: 160 }}>{r.instructions}</td>
                 <td>{r.staff || <span className="muted">—</span>}</td>
                 <td><Status s={r.status} />{r.note && r.status === 'missed' && <div className="small">{r.note}</div>}</td>
@@ -377,14 +390,22 @@ export function CustomerDetail() {
   const { id } = useParams()
   const { data: u, loading, reload } = useFetch(`/api/admin/customers/${id}`)
   const toast = useToast()
-  const upd = async (body) => { try { await api.put(`/api/admin/customers/${id}`, body); toast.success('Updated'); reload() } catch (e) { toast.error(e) } }
+  const upd = async (body) => { try { await api.put(`/api/admin/customers/${id}`, body); toast.success('Updated'); reload(); return true } catch (e) { toast.error(e); return false } }
+  const [pw, setPw] = useState(null)
   if (loading) return <SkeletonRows />
   return (
     <>
-      <PageHead title={u.name} sub={`${u.email} · ${u.phone} · joined ${fmtDate(u.created_at)}`}>
+      <PageHead title={u.name} sub={`${u.email ? u.email + ' · ' : ''}${u.phone} · joined ${fmtDate(u.created_at)}`}>
+        <button className="btn btn-sm btn-outline" onClick={() => setPw('')}>Set new password</button>
+        {waLink(u.phone) && <a className="btn btn-sm btn-outline wa-btn" href={waLink(u.phone, `Hi ${u.name.split(' ')[0]}, this is Aditya Milk Dairy.`)} target="_blank" rel="noreferrer"><I.whatsapp width={15} height={15} /> WhatsApp</a>}
         <button className={`btn btn-sm ${u.is_active ? 'btn-danger' : 'btn-navy'}`} onClick={() => upd({ is_active: !u.is_active })}>{u.is_active ? 'Block account' : 'Unblock account'}</button>
         {u.trial_used && <button className="btn btn-sm btn-outline" onClick={() => upd({ trial_used: false })}>Reset trial eligibility</button>}
       </PageHead>
+      {pw !== null && <Modal title={`New password for ${u.name}`} onClose={() => setPw(null)}>
+        <p className="muted small" style={{ marginTop: 0 }}>Use this when a customer forgot their password. Tell them the new password on call or WhatsApp.</p>
+        <Field label="New password" id="np" hint="At least 8 characters with letters and numbers"><input id="np" className="input" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></Field>
+        <button className="btn btn-navy" disabled={pw.length < 8} onClick={async () => { if (await upd({ new_password: pw })) setPw(null) }}>Save password</button>
+      </Modal>}
       <div className="cols-2">
         <div className="panel"><div className="panel-head"><h3>Subscriptions</h3></div>
           <div className="table-wrap"><table className="t"><tbody>{u.subscriptions.map((s) => <tr key={s.id}><td><Link to={`/admin/bookings/${s.id}`} className="strong">#{s.id} {s.plan}</Link><div className="small">{fmtDate(s.start_date)} → {fmtDate(s.end_date)}</div></td><td>{inr(s.total_amount)}</td><td><Status s={s.status} /></td></tr>)}</tbody></table></div>

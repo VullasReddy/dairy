@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, fmtDate } from '../../api'
 import { useAuth, useFetch, useReveal, useSite, useToast } from '../../context'
@@ -14,11 +14,11 @@ export function About() {
   useReveal()
   return (
     <>
-      <PageHero title={a.title || 'About Aditya Milk Dairy'} sub="A family dairy bringing farm-fresh milk to homes in Vijayawada, Hyderabad, Bengaluru and Chennai every morning." crumbs="About" />
+      <PageHero title={a.title || 'About Aditya Milk Dairy'} sub="A family dairy bringing farm-fresh milk to homes in Narasaraopet, Vijayawada, Hyderabad, Bengaluru and Chennai every morning." crumbs="About" />
       <div className="page-bg">
         <section className="section container">
           <div className="grid-2" style={{ alignItems: 'center' }}>
-            <div className="journey-card reveal"><img src="/images/farm-journey.jpg" alt="Aditya farm" /></div>
+            <div className="journey-card reveal"><img src="/images/cattle-shed.webp" alt="Aditya Milk Dairy cattle shed with cows" style={{ aspectRatio: '3 / 2' }} /></div>
             <div className="reveal">
               <h2 className="serif" style={{ fontSize: 28 }}>Our Story</h2>
               <p><RichText text={a.text} /></p>
@@ -33,6 +33,48 @@ export function About() {
             <div className="grid-4 reveal">{a.values.map((v) => <div className="card" key={v} style={{ textAlign: 'center' }}><I.check size={28} style={{ color: 'var(--green)', margin: '0 auto 8px' }} /><b style={{ color: 'var(--navy-ink)' }}>{v}</b></div>)}</div>
           </section>
         )}
+        <section className="section container">
+          <div className="about-stats reveal">
+            {[['4', 'cities served'], ['340+', 'PIN codes covered'], ['Before 8 AM', 'daily doorstep delivery'], ['0', 'preservatives or powder']].map(([n, l]) => (
+              <div key={l}><b>{n}</b><span>{l}</span></div>
+            ))}
+          </div>
+        </section>
+        <section className="section container">
+          <div className="grid-2" style={{ alignItems: 'start', gap: 26 }}>
+            <div className="card reveal">
+              <h3 className="serif" style={{ fontSize: 22, marginTop: 0 }}>Our farm &amp; animals</h3>
+              <ul className="ticks">
+                <li>Healthy cows and buffaloes in airy, clean sheds with plenty of space to move and rest.</li>
+                <li>Balanced feed – green fodder, dry fodder and mineral mix – with clean drinking water all day.</li>
+                <li>Regular veterinary check-ups and vaccinations; no hormone injections to push milk yield.</li>
+                <li>Hygienic milking twice a day, with udders cleaned before every milking.</li>
+              </ul>
+            </div>
+            <div className="card reveal">
+              <h3 className="serif" style={{ fontSize: 22, marginTop: 0 }}>Quality at every step</h3>
+              <ul className="ticks">
+                <li>Milk is chilled to about 4°C soon after milking to keep it fresh and safe.</li>
+                <li>Every batch is checked for fat, SNF and common adulterants before it is packed.</li>
+                <li>Sealed, food-grade packets – untouched by hand from our farm to your door.</li>
+                <li>Lab reports are published on our <Link to="/quality">Quality</Link> page.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+        <section className="section container">
+          <SectionTitle title="Why Families Choose Us" sub="Simple, honest and on time – every morning" />
+          <div className="grid-3 reveal">
+            {[
+              [I.truck, 'Delivered before 8 AM', 'Your milk is at the door before the day begins – tea, coffee and breakfast sorted.'],
+              [I.calendar, 'Fully flexible', 'Skip a day, pause for a trip or add extra milk for guests from your phone.'],
+              [I.shield, 'Pay safely in advance', 'Clear prices, receipts for every payment and refunds for undelivered days.'],
+              [I.bell, 'Always informed', 'Delivery updates on the website, by email and on WhatsApp.'],
+              [I.map, 'Exact doorstep', 'Drop a map pin so our delivery partner finds your home every time.'],
+              [I.phone, 'Real people to help', 'Call, WhatsApp or ask our help assistant – we reply quickly.'],
+            ].map(([Ico, t, d]) => <div className="card why-card" key={t}><Ico size={26} /><b>{t}</b><p>{d}</p></div>)}
+          </div>
+        </section>
         <section className="section container" id="journey">
           <SectionTitle title="Our Journey From Farm to Home" sub="The same careful steps, every single morning" />
           <div className="timeline reveal" style={{ marginTop: 26 }}>
@@ -219,23 +261,41 @@ export function Contact() {
           <div className="card">
             <h3>Reach us directly</h3>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
-              <li style={{ display: 'flex', gap: 10 }}><I.phone style={{ color: 'var(--navy)' }} /><a href={`tel:${(b.phone || '').replace(/\s/g, '')}`}>{b.phone}</a></li>
               <li style={{ display: 'flex', gap: 10 }}><I.whatsapp style={{ color: '#25D366' }} /><a href={`https://wa.me/${b.whatsapp}`} target="_blank" rel="noreferrer">Chat on WhatsApp</a></li>
               <li style={{ display: 'flex', gap: 10 }}><I.chat style={{ color: 'var(--navy)' }} /><a href={`mailto:${b.email}`}>{b.email}</a></li>
               <li style={{ display: 'flex', gap: 10 }}><I.map style={{ color: 'var(--navy)' }} /><span>{b.address}</span></li>
               <li style={{ display: 'flex', gap: 10 }}><I.truck style={{ color: 'var(--navy)' }} /><span>{b.delivery_timings}<br /><small className="muted">{b.order_cutoff}</small></span></li>
             </ul>
             <h4 style={{ marginTop: 20 }}>Areas we deliver to</h4>
-            {Object.entries((areas || []).reduce((acc, a) => { (acc[a.city] = acc[a.city] || []).push(a); return acc }, {})).map(([city, list]) => (
-              <div key={city} className="mb-3">
-                <div className="font-semibold text-navy-ink text-sm mb-1.5 flex items-center gap-1.5"><I.map size={15} />{city}</div>
-                <div className="flex flex-wrap gap-1.5">{list.map((a) => <span key={a.id} className="pill blue">{a.area} · {a.pincode}</span>)}</div>
-              </div>
-            ))}
+            <AreaList areas={areas || []} />
           </div>
         </div>
       </section></div>
     </>
+  )
+}
+
+function AreaList({ areas }) {
+  const byCity = useMemo(() => areas.reduce((acc, a) => { (acc[a.city] = acc[a.city] || []).push(a); return acc }, {}), [areas])
+  const cities = Object.keys(byCity).sort((x, y) => (y === 'Narasaraopet') - (x === 'Narasaraopet'))
+  const [city, setCity] = useState(null)
+  const [q, setQ] = useState('')
+  const cur = city && byCity[city] ? city : cities[0]
+  if (!cities.length) return null
+  const needle = q.trim().toLowerCase()
+  const list = (byCity[cur] || []).filter((a) => !needle || a.pincode.includes(needle) || a.area.toLowerCase().includes(needle))
+    .sort((x, y) => x.area.localeCompare(y.area))
+  return (
+    <div className="area-list">
+      <div className="area-tabs" role="tablist">
+        {cities.map((c) => <button key={c} type="button" role="tab" aria-selected={c === cur} className={c === cur ? 'on' : ''} onClick={() => setCity(c)}>{c}<small>{byCity[c].length}</small></button>)}
+      </div>
+      <input className="input area-search" placeholder="Search area or PIN code" aria-label="Search area or PIN code" value={q} onChange={(e) => setQ(e.target.value)} />
+      <ul className="area-grid">
+        {list.map((a) => <li key={a.id}><span>{a.area}</span><b>{a.pincode}</b></li>)}
+        {!list.length && <li className="muted">No match in {cur}.</li>}
+      </ul>
+    </div>
   )
 }
 
@@ -248,7 +308,6 @@ export function Policy() {
       <div className="page-bg"><section className="section container" style={{ maxWidth: 820 }}>
         <ErrorBox error={error} />
         {data && <div className="card prose">{data.body.split(/\n\n+/).map((p, i) => <p key={i}>{p}</p>)}</div>}
-        <p style={{ textAlign: 'center', marginTop: 16 }}><Link to="/policy/privacy">Privacy</Link> · <Link to="/policy/terms">Terms</Link> · <Link to="/policy/refund">Cancellation & Refund</Link></p>
       </section></div>
     </>
   )

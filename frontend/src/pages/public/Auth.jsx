@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../../api'
-import { useAuth, useToast } from '../../context'
+import { api, waLink } from '../../api'
+import { useAuth, useSite, useToast } from '../../context'
 import { Field, Logo, Spinner } from '../../components/ui'
 import { Eye, EyeOff } from 'lucide-react'
 
@@ -33,38 +33,109 @@ function Shell({ title, sub, children }) {
 
 export function Login() {
   const { login } = useAuth()
+  const site = useSite()
   const [params] = useSearchParams()
   const nav = useNavigate()
   const toast = useToast()
+  const [mode, setMode] = useState('password')
   const [f, setF] = useState({ email: '', password: '' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const finish = (u) => {
+    toast.success(`Welcome back, ${u.name.split(' ')[0]}!`)
+    nav(params.get('next') || homeFor(u), { replace: true })
+  }
   const submit = async (e) => {
     e.preventDefault()
-    if (!f.email || !f.password) { setErr('Please enter your email/phone and password.'); return }
+    if (!f.email || !f.password) { setErr('Please enter your mobile number and password.'); return }
     setBusy(true); setErr('')
-    try {
-      const u = await login(f.email, f.password)
-      toast.success(`Welcome back, ${u.name.split(' ')[0]}!`)
-      nav(params.get('next') || homeFor(u), { replace: true })
-    } catch (e2) { setErr(e2.message) } finally { setBusy(false) }
+    try { finish(await login(f.email, f.password)) } catch (e2) { setErr(e2.message) } finally { setBusy(false) }
   }
   return (
     <Shell title="Welcome back" sub="Log in to manage your milk subscription">
-      <form onSubmit={submit} noValidate>
-        {err && <div className="notice err" style={{ marginBottom: 12 }} role="alert">{err}</div>}
-        <Field label="Email or mobile number" id="l-email"><input id="l-email" className="input" autoComplete="username" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-        <Field label="Password" id="l-pw"><PasswordInput id="l-pw" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
-        <div style={{ textAlign: 'right', marginTop: -6, marginBottom: 14 }}><Link to="/forgot-password" style={{ fontSize: 13 }}>Forgot password?</Link></div>
-        <button className="btn btn-navy btn-block btn-lg" disabled={busy}>{busy && <Spinner />} Log in</button>
-      </form>
+      {site.otp_login && <div className="auth-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={mode === 'password'} className={mode === 'password' ? 'on' : ''} onClick={() => { setMode('password'); setErr('') }}>Password</button>
+        <button type="button" role="tab" aria-selected={mode === 'otp'} className={mode === 'otp' ? 'on' : ''} onClick={() => { setMode('otp'); setErr('') }}>Login with OTP</button>
+      </div>}
+      {mode === 'password' || !site.otp_login ? (
+        <form onSubmit={submit} noValidate>
+          {err && <div className="notice err" style={{ marginBottom: 12 }} role="alert">{err}</div>}
+          <Field label="Mobile number" id="l-email" hint="Staff & admin can use their email"><input id="l-email" className="input" inputMode="tel" autoComplete="username" placeholder="98765 43210" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+          <Field label="Password" id="l-pw"><PasswordInput id="l-pw" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+          <div style={{ textAlign: 'right', marginTop: -6, marginBottom: 14 }}><Link to="/forgot-password" style={{ fontSize: 13 }}>Forgot password?</Link></div>
+          <button className="btn btn-navy btn-block btn-lg" disabled={busy}>{busy && <Spinner />} Log in</button>
+        </form>
+      ) : <OtpLogin initial={/^\d/.test(f.email) ? f.email : ''} onDone={finish} />}
       <p style={{ textAlign: 'center', fontSize: 14, marginBottom: 0 }}>New to Aditya Milk Dairy? <Link to={`/register${params.get('next') ? `?next=${params.get('next')}` : ''}`} style={{ fontWeight: 600 }}>Create an account</Link></p>
     </Shell>
   )
 }
 
+function OtpLogin({ initial, onDone }) {
+  const { loginWithOtp } = useAuth()
+  const [id, setId] = useState(initial || '')
+  const [step, setStep] = useState('ask')
+  const [code, setCode] = useState('')
+  const [info, setInfo] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [wait, setWait] = useState(0)
+  useEffect(() => {
+    if (wait <= 0) return
+    const t = setTimeout(() => setWait((w) => w - 1), 1000)
+    return () => clearTimeout(t)
+  }, [wait])
+  const send = async (e) => {
+    e?.preventDefault()
+    const v = id.trim()
+    if (!v) { setErr('Enter your mobile number or email.'); return }
+    if (!v.includes('@') && !/^[6-9]\d{9}$/.test(v.replace(/\D/g, '').slice(-10))) { setErr('Enter a valid 10-digit mobile number.'); return }
+    setBusy(true); setErr('')
+    try {
+      const r = await api.post('/api/auth/otp/request', { identifier: v })
+      setInfo(r); setStep('code'); setCode(''); setWait(r.resend_in || 30)
+    } catch (e2) { setErr(e2.message) } finally { setBusy(false) }
+  }
+  const verify = async (e) => {
+    e?.preventDefault()
+    if (code.length !== 6) { setErr('Enter the 6-digit code.'); return }
+    setBusy(true); setErr('')
+    try { onDone(await loginWithOtp(id.trim(), code)) } catch (e2) { setErr(e2.message) } finally { setBusy(false) }
+  }
+  if (step === 'ask') return (
+    <form onSubmit={send} noValidate>
+      {err && <div className="notice err" style={{ marginBottom: 12 }} role="alert">{err}</div>}
+      <Field label="Mobile number or email" id="o-id" hint="We'll send a 6-digit code. No password needed.">
+        <input id="o-id" className="input" inputMode="tel" autoComplete="tel" placeholder="98765 43210" value={id} onChange={(e) => setId(e.target.value)} />
+      </Field>
+      <button className="btn btn-navy btn-block btn-lg" disabled={busy}>{busy && <Spinner />} Send OTP</button>
+    </form>
+  )
+  return (
+    <form onSubmit={verify} noValidate>
+      {err && <div className="notice err" style={{ marginBottom: 12 }} role="alert">{err}</div>}
+      <div className="notice info" style={{ marginBottom: 12 }}>Code sent by {info.sent_to.join(' and ')}.</div>
+      {info.dev_code && <div className="notice warn" style={{ marginBottom: 12 }}>Development mode – your code is <b>{info.dev_code}</b></div>}
+      <Field label="Enter 6-digit code" id="o-code">
+        <input id="o-code" className="input otp-input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus value={code}
+          onChange={(e) => { const c = e.target.value.replace(/\D/g, '').slice(0, 6); setCode(c) }} />
+      </Field>
+      <button className="btn btn-navy btn-block btn-lg" disabled={busy || code.length !== 6}>{busy && <Spinner />} Verify &amp; log in</button>
+      <div className="otp-links">
+        <button type="button" className="link-btn" onClick={() => { setStep('ask'); setErr('') }}>Change number</button>
+        {wait > 0 ? <span className="muted">Resend in {wait}s</span> : <button type="button" className="link-btn" disabled={busy} onClick={send}>Resend code</button>}
+      </div>
+    </form>
+  )
+}
+
 export function Register() {
   const { register } = useAuth()
+  const site = useSite()
+  const [otp, setOtp] = useState(null) // { token, message, dev_code } once a code was sent
+  const [code, setCode] = useState('')
+  const [wait, setWait] = useState(0)
+  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait((w) => w - 1), 1000); return () => clearTimeout(t) }, [wait])
   const [params] = useSearchParams()
   const nav = useNavigate()
   const toast = useToast()
@@ -76,7 +147,7 @@ export function Register() {
     e.preventDefault()
     const v = {}
     if (!f.full_name.trim()) v.full_name = 'Enter your full name'
-    if (!/^\S+@\S+\.\S+$/.test(f.email)) v.email = 'Enter a valid email'
+    if (f.email && !/^\S+@\S+\.\S+$/.test(f.email)) v.email = 'Enter a valid email'
     if (!/^[6-9]\d{9}$/.test(f.phone.replace(/\D/g, '').slice(-10))) v.phone = 'Enter a valid 10-digit mobile number'
     if (f.password.length < 8 || !/\d/.test(f.password) || !/[a-z]/i.test(f.password)) v.password = 'At least 8 characters with a letter and a number'
     if (f.password !== f.confirm) v.confirm = 'Passwords do not match'
@@ -85,8 +156,15 @@ export function Register() {
     if (Object.keys(v).length) return
     setBusy(true)
     try {
-      await register({ full_name: f.full_name, email: f.email, phone: f.phone, password: f.password })
-      toast.success('Account created! Your free trial is waiting.')
+      if (site.otp_login && !otp) { // step 1: text a code to the mobile number
+        const r = await api.post('/api/auth/register/send-otp', { phone: f.phone })
+        setOtp(r); setWait(r.resend_in || 30); setCode('')
+        return
+      }
+      if (site.otp_login && code.length !== 6) { setErr({ otp: 'Enter the 6-digit code' }); return }
+      await register({ full_name: f.full_name, email: f.email.trim() || undefined, phone: f.phone, password: f.password,
+        ...(site.otp_login ? { otp_token: otp.otp_token, otp: code } : {}) })
+      toast.success('Account created! Welcome to Aditya Milk Dairy.')
       nav(params.get('next') || '/account', { replace: true })
     } catch (e2) { setErr({ [e2.field || 'form']: e2.message }) } finally { setBusy(false) }
   }
@@ -95,15 +173,25 @@ export function Register() {
       <form onSubmit={submit} noValidate>
         {err.form && <div className="notice err" style={{ marginBottom: 12 }}>{err.form}</div>}
         <Field label="Full name" error={err.full_name} id="r-name"><input id="r-name" className={`input ${err.full_name ? 'err' : ''}`} autoComplete="name" value={f.full_name} onChange={set('full_name')} /></Field>
-        <Field label="Email" error={err.email} id="r-email"><input id="r-email" type="email" className={`input ${err.email ? 'err' : ''}`} autoComplete="email" value={f.email} onChange={set('email')} /></Field>
-        <Field label="Mobile number" error={err.phone} id="r-phone"><input id="r-phone" className={`input ${err.phone ? 'err' : ''}`} inputMode="tel" autoComplete="tel" placeholder="10-digit mobile" value={f.phone} onChange={set('phone')} /></Field>
+        <Field label="Mobile number" error={err.phone} id="r-phone" hint={site.otp_login ? "We'll send a code to verify this number" : "You'll log in with this number"}><input id="r-phone" className={`input ${err.phone ? 'err' : ''}`} inputMode="tel" autoComplete="tel" placeholder="10-digit mobile" value={f.phone} onChange={(e) => { set('phone')(e); setOtp(null) }} /></Field>
+        <Field label="Email (optional)" error={err.email} id="r-email"><input id="r-email" type="email" className={`input ${err.email ? 'err' : ''}`} autoComplete="email" value={f.email} onChange={set('email')} /></Field>
         <div className="form-row">
           <Field label="Password" error={err.password} id="r-pw"><PasswordInput id="r-pw" className={err.password ? 'err' : ''} autoComplete="new-password" value={f.password} onChange={set('password')} /></Field>
           <Field label="Confirm password" error={err.confirm} id="r-pw2"><PasswordInput id="r-pw2" className={err.confirm ? 'err' : ''} autoComplete="new-password" value={f.confirm} onChange={set('confirm')} /></Field>
         </div>
         <label className="check"><input type="checkbox" checked={f.agree} onChange={set('agree')} /> I agree to the <Link to="/policy/terms" target="_blank">Terms</Link> and <Link to="/policy/privacy" target="_blank">Privacy Policy</Link></label>
         {err.agree && <div className="field"><span className="error">{err.agree}</span></div>}
-        <button className="btn btn-navy btn-block btn-lg" style={{ marginTop: 16 }} disabled={busy}>{busy && <Spinner />} Create account</button>
+        {otp && (
+          <div className="notice info" style={{ marginTop: 14 }}>
+            <div style={{ marginBottom: 8 }}>{otp.message}</div>
+            {otp.dev_code && <div style={{ marginBottom: 8 }}>Development mode – code: <b>{otp.dev_code}</b></div>}
+            <Field label="Enter 6-digit code" error={err.otp} id="r-otp">
+              <input id="r-otp" className="input otp-input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+            </Field>
+            {wait > 0 ? <small className="muted">Resend in {wait}s</small> : <button type="button" className="link-btn" onClick={async () => { try { const r = await api.post('/api/auth/register/send-otp', { phone: f.phone }); setOtp(r); setWait(r.resend_in || 30) } catch (e2) { setErr({ form: e2.message }) } }}>Resend code</button>}
+          </div>
+        )}
+        <button className="btn btn-navy btn-block btn-lg" style={{ marginTop: 16 }} disabled={busy}>{busy && <Spinner />} {site.otp_login && !otp ? 'Send OTP' : site.otp_login ? 'Verify & create account' : 'Create account'}</button>
       </form>
       <p style={{ textAlign: 'center', fontSize: 14, marginBottom: 0 }}>Already have an account? <Link to="/login" style={{ fontWeight: 600 }}>Log in</Link></p>
     </Shell>
@@ -111,6 +199,7 @@ export function Register() {
 }
 
 export function ForgotPassword() {
+  const site = useSite()
   const [email, setEmail] = useState('')
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -119,13 +208,14 @@ export function ForgotPassword() {
     try { setMsg(await api.post('/api/auth/forgot-password', { email })) } catch (e2) { setMsg({ error: e2.message }) } finally { setBusy(false) }
   }
   return (
-    <Shell title="Reset password" sub="We'll email you a reset link">
+    <Shell title="Forgot password?" sub="We'll help you get back in">
+      {waLink(site.business?.whatsapp) && <div className="notice info" style={{ marginBottom: 14 }}>Registered with your mobile number? <a href={waLink(site.business.whatsapp, 'Hi, I forgot my Aditya Milk Dairy password. My registered mobile number is: ')} target="_blank" rel="noreferrer"><b>Message us on WhatsApp</b></a> and we'll reset it for you.</div>}
       {msg?.message ? (
         <div className="notice ok">{msg.message}{msg.dev_reset_token && <> <br /><Link to={`/reset-password?token=${msg.dev_reset_token}`}>(Dev mode) Open reset link</Link></>}</div>
       ) : (
         <form onSubmit={submit}>
           {msg?.error && <div className="notice err">{msg.error}</div>}
-          <Field label="Email" id="f-email"><input id="f-email" type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
+          <Field label="Or enter your email (if you added one)" id="f-email"><input id="f-email" type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
           <button className="btn btn-navy btn-block" disabled={busy}>{busy && <Spinner />} Send reset link</button>
         </form>
       )}

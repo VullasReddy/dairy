@@ -42,13 +42,23 @@ class Config:
     SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
     SMTP_USER = os.getenv("SMTP_USER", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-    MAIL_FROM = os.getenv("MAIL_FROM", "Aditya Milk Dairy <no-reply@adityamilkdairy.com>")
+    MAIL_FROM = os.getenv("MAIL_FROM", "")  # empty = "Aditya Milk Dairy <SMTP_USER>"
 
     # WhatsApp (optional) – see app/services/messaging.py
     WHATSAPP_PROVIDER = os.getenv("WHATSAPP_PROVIDER", "")
     WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
     WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
     WHATSAPP_TEMPLATE = os.getenv("WHATSAPP_TEMPLATE", "")
+    WHATSAPP_LANG = os.getenv("WHATSAPP_LANG", "en")
+    # Approved WhatsApp "Authentication" template for login codes (body {{1}} = code, with copy-code button)
+    WHATSAPP_OTP_TEMPLATE = os.getenv("WHATSAPP_OTP_TEMPLATE", "")
+
+    # SMS for mobile OTP login (optional): fast2sms | msg91. Without it, codes go by WhatsApp/email.
+    SMS_PROVIDER = os.getenv("SMS_PROVIDER", "")
+    FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY", "")
+    MSG91_AUTH_KEY = os.getenv("MSG91_AUTH_KEY", "")
+    MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID", "")
+    OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "5"))
 
     # Rate limiting (use redis:// in production with several workers)
     RATELIMIT_ENABLED = os.getenv("RATELIMIT_ENABLED", "1") == "1"

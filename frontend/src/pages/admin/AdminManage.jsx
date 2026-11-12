@@ -395,7 +395,7 @@ export function Enquiries() {
       <div className="panel">
         <div className="panel-head"><div className="filters">
           <select className="input" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option></select>
-          <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="">All types</option><option value="enquiry">Enquiry</option><option value="support">Support</option><option value="complaint">Complaint</option></select>
+          <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="">All types</option><option value="enquiry">Enquiry</option><option value="support">Support</option><option value="complaint">Complaint</option><option value="newsletter">Newsletter</option></select>
         </div></div>
         {loading ? <SkeletonRows /> : !data.length ? <Empty icon="chat" title="Inbox zero 🎉" /> : (
           <div className="table-wrap"><table className="t"><thead><tr><th>From</th><th>Type</th><th>Message</th><th>Status</th><th /></tr></thead><tbody>
@@ -469,6 +469,7 @@ function BusinessSettings() {
       </div></div>
       <div className="panel"><div className="panel-head"><h3>Booking rules</h3><button className="btn btn-sm btn-navy" onClick={() => save(() => api.put('/api/admin/settings', s))}>Save settings</button></div><div className="panel-body">
         {T('max_daily_qty', 'Max packets per item per day', 'number')}{T('max_skips_per_subscription', 'Max skipped days per subscription', 'number')}{T('max_pause_days', 'Max pause length (days)', 'number')}{T('reminder_days_before', 'Renewal reminder (days before expiry)', 'number')}
+        <Field label="Extra milk cut-off (orders for tomorrow close at)" id="cch"><select id="cch" className="input" value={s.change_cutoff_hour ?? 21} onChange={(e) => setS({ ...s, change_cutoff_hour: Number(e.target.value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${(h % 12) || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`}</option>)}</select></Field>
         <Field label="Missed delivery policy" id="mdp"><select id="mdp" className="input" value={s.missed_delivery_policy} onChange={(e) => setS({ ...s, missed_delivery_policy: e.target.value })}><option value="extend">Add a make-up day at the end</option><option value="refund">Refund (handled manually)</option></select></Field>
         <div className="grid gap-2.5">
           {[['trial_requires_verification', 'Free trial requires a verified email'], ['booking_requires_approval', 'Paid bookings require admin approval before activation'],
@@ -478,18 +479,56 @@ function BusinessSettings() {
         </div>
         <div className="notice info" style={{ marginTop: 14 }}>Payment, email and WhatsApp keys are set on the server in backend/.env (PAYMENT_PROVIDER, RAZORPAY_*, SMTP_*, WHATSAPP_*) – never in the browser.</div>
       </div></div>
+      <Integrations />
     </div>
   )
 }
 
-const CITIES = ['Vijayawada', 'Hyderabad', 'Bengaluru', 'Chennai']
+function Integrations() {
+  const { data } = useFetch('/api/admin/integrations')
+  const toast = useToast()
+  const [phone, setPhone] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!data) return null
+  const Row = ({ ok, name, text }) => (
+    <div className="integ-row"><span className={`pill ${ok ? 'green' : 'grey'}`}>{ok ? 'Connected' : 'Not set up'}</span><div><b>{name}</b><div className="small muted">{text}</div></div></div>
+  )
+  const [em, setEm] = useState('')
+  const testEmail = async () => {
+    setBusy(true)
+    try { const r = await api.post('/api/admin/integrations/email-test', { email: em }); toast.success(r.message) } catch (e) { toast.error(e) } finally { setBusy(false) }
+  }
+  const test = async () => {
+    setBusy(true)
+    try { const r = await api.post('/api/admin/integrations/whatsapp-test', { phone }); toast.success(r.message) } catch (e) { toast.error(e) } finally { setBusy(false) }
+  }
+  return (
+    <div className="panel"><div className="panel-head"><h3>Messaging &amp; integrations</h3></div><div className="panel-body">
+      <Row ok={data.whatsapp.configured} name="WhatsApp Business" text={data.whatsapp.configured ? `Updates ${data.whatsapp.enabled ? 'ON' : 'OFF (tick the box above)'}${data.whatsapp.template ? ` · template “${data.whatsapp.template}”` : ' · no template (messages only reach customers who wrote to you in the last 24h)'}` : 'Server needs WHATSAPP_PROVIDER=meta, WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID'} />
+      <Row ok={data.sms.configured} name="SMS for OTP login" text={data.sms.configured ? `Provider: ${data.sms.provider}` : 'Optional – SMS_PROVIDER=fast2sms or msg91. Without it, login codes go by WhatsApp / email.'} />
+      <Row ok={!!data.whatsapp.otp_template} name="WhatsApp OTP template" text={data.whatsapp.otp_template ? `“${data.whatsapp.otp_template}”` : 'Optional – WHATSAPP_OTP_TEMPLATE (an approved Authentication template)'} />
+      <Row ok={data.email.configured} name="Email (SMTP)" text={data.email.configured ? 'Emails are being sent – use “Send a test email” below to check' : 'Not set up – OTP codes and verification links are NOT emailed. Add SMTP_* to backend/.env (Gmail App Password)'} />
+      <Row ok={data.payments.provider !== 'mock'} name="Payments" text={`Mode: ${data.payments.provider}`} />
+      <div className="field" style={{ marginTop: 14 }}><label htmlFor="em-test">Send a test email</label>
+        <div style={{ display: 'flex', gap: 8 }}><input id="em-test" className="input" type="email" placeholder="you@example.com" value={em} onChange={(e) => setEm(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+          <button type="button" className="btn btn-navy" disabled={busy || !em} onClick={testEmail}>Send test</button></div>
+      </div>
+      <div className="field" style={{ marginTop: 14 }}><label htmlFor="wa-test">Send a WhatsApp test message</label>
+        <div style={{ display: 'flex', gap: 8 }}><input id="wa-test" className="input" inputMode="tel" placeholder="10-digit mobile" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+          <button type="button" className="btn btn-navy" disabled={busy || !phone} onClick={test}>Send test</button></div>
+      </div>
+    </div></div>
+  )
+}
+
+const CITIES = ['Narasaraopet', 'Vijayawada', 'Hyderabad', 'Bengaluru', 'Chennai']
 
 function Pincodes() {
   const [city, setCity] = useState('')
   const { data, loading, reload } = useFetch(`/api/admin/pincodes${city ? `?city=${encodeURIComponent(city)}` : ''}`)
   const save = useSaver(reload)
   const del = useDelete(reload)
-  const [n, setN] = useState({ pincode: '', area: '', city: 'Vijayawada' })
+  const [n, setN] = useState({ pincode: '', area: '', city: 'Narasaraopet' })
   const cities = [...new Set([...CITIES, ...(data || []).map((p) => p.city)])]
   return (
     <div className="panel"><div className="panel-head"><h3>Serviceable areas</h3>

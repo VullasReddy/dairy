@@ -98,6 +98,8 @@ def notify(user, title, message, kind="info", email=True, whatsapp=None):
         send_email(user.email, f"Aditya Milk Dairy – {title}", message)
     if whatsapp is None:
         whatsapp = kind in WHATSAPP_KINDS and bool(settings().get("whatsapp_notifications"))
+    if whatsapp and user.profile is not None and user.profile.whatsapp_opt_in is False:
+        whatsapp = False  # customer turned WhatsApp updates off in their profile
     if whatsapp and user.phone:
         from .services.messaging import send_whatsapp
         send_whatsapp(user.phone, f"{title}: {message}")

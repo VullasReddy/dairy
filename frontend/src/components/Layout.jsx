@@ -3,7 +3,9 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { I } from './Icons'
 import { Logo } from './ui'
 import { LocationChip, UnavailableBar } from './Location'
-import { useAuth, useCart, useSite } from '../context'
+import { useAuth, useCart, useSite, useToast } from '../context'
+import { api } from '../api'
+import HelpAgent from './HelpAgent'
 
 const LINKS = [
   ['/', 'Home'], ['/products', 'Products'], ['/subscriptions', 'Subscriptions'], ['/about', 'About'],
@@ -61,44 +63,72 @@ export function Navbar() {
 export function Footer() {
   const { business: b = {} } = useSite()
   const social = b.social || {}
+  const toast = useToast()
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const subscribe = async (e) => {
+    e.preventDefault()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { toast.error('Please enter a valid email address.'); return }
+    setBusy(true)
+    try { const r = await api.post('/api/public/newsletter', { email: email.trim() }); toast.success(r.message); setEmail('') } catch (err) { toast.error(err) } finally { setBusy(false) }
+  }
+  const mail = b.email || 'puritfarms@gmail.com'
   return (
     <footer>
       <div className="footer">
         <div className="container footer-grid">
-          <div style={{ paddingTop: 10 }}><Logo light /></div>
-          <div>
-            <h4>Quick Links</h4>
-            <div className="links">
-              <div><Link to="/">Home</Link><Link to="/products">Products</Link><Link to="/subscriptions">Subscriptions</Link></div>
-              <div><Link to="/about">About</Link><Link to="/quality">Quality</Link><Link to="/testimonials">Testimonials</Link></div>
-              <div><Link to="/blog">Blog</Link><Link to="/faq">FAQ</Link><Link to="/contact">Contact</Link></div>
-            </div>
+          <div className="f-brand">
+            <Logo light />
+            <p className="f-office"><b>Head Office</b> — {b.address || `${b.city || 'Narasaraopet'}, India`}</p>
+            <form className="f-news" onSubmit={subscribe} noValidate>
+              <label htmlFor="f-news-email">Subscribe to our newsletter</label>
+              <div>
+                <input id="f-news-email" type="email" placeholder="Email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <button type="submit" disabled={busy} aria-label="Subscribe">{busy ? '…' : <I.arrow size={16} />}</button>
+              </div>
+            </form>
           </div>
           <div>
-            <h4>Contact Us</h4>
-            <ul className="contact">
-              <li><I.phone /><a href={`tel:${(b.phone || '').replace(/\s/g, '')}`}>{b.phone || '+91 98765 43210'}</a></li>
-              <li><I.mail /><a href={`mailto:${b.email}`}>{b.email || 'info@adityamilkdairy.com'}</a></li>
-              <li><I.pin /><span>{b.city || 'Vijayawada'}, India</span></li>
+            <h4>Services</h4>
+            <ul className="f-list">
+              <li><Link to="/about">About Us</Link></li>
+              <li><Link to="/products">Shop All</Link></li>
+              <li><Link to="/subscriptions">Subscriptions</Link></li>
+              <li><Link to="/quality">Quality &amp; Lab Tests</Link></li>
+              <li><Link to="/blog">Blog</Link></li>
+              <li><Link to="/faq">FAQ</Link></li>
             </ul>
           </div>
           <div>
-            <h4>Follow Us</h4>
+            <h4>Policies</h4>
+            <ul className="f-list">
+              <li><Link to="/contact">Contact Us</Link></li>
+              <li><Link to="/policy/privacy">Privacy Policy</Link></li>
+              <li><Link to="/policy/delivery">Delivery Info</Link></li>
+              <li><Link to="/policy/refund">Cancellation &amp; Refunds</Link></li>
+              <li><Link to="/account/subscriptions">Track Your Order</Link></li>
+              <li><Link to="/policy/terms">Terms of Service</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Need Help?</h4>
+            <ul className="contact">
+              <li><I.pin /><span>{b.address || `${b.city || 'Narasaraopet'}, India`}</span></li>
+              <li><I.mail /><a href={`mailto:${mail}`}>{mail}</a></li>
+            </ul>
             <div className="socials">
-              {social.facebook && <a href={social.facebook} target="_blank" rel="noreferrer" aria-label="Facebook"><I.facebook /></a>}
               {social.instagram && <a href={social.instagram} target="_blank" rel="noreferrer" aria-label="Instagram"><I.instagram /></a>}
+              {social.facebook && <a href={social.facebook} target="_blank" rel="noreferrer" aria-label="Facebook"><I.facebook /></a>}
               {social.youtube && <a href={social.youtube} target="_blank" rel="noreferrer" aria-label="YouTube"><I.youtube /></a>}
               {b.whatsapp && <a href={`https://wa.me/${b.whatsapp}`} aria-label="WhatsApp" target="_blank" rel="noreferrer"><I.whatsapp /></a>}
             </div>
           </div>
-          <div className="slogan" aria-hidden="true">Goodness in every<span>drop</span></div>
         </div>
         <img className="splash" src="/images/footer-splash.png" alt="" />
       </div>
       <div className="footer-bottom">
         <div className="container">
           <span>© {new Date().getFullYear()} {b.business_name || 'Aditya Milk Dairy'}. All rights reserved.</span>
-          <span className="pol"><Link to="/policy/privacy">Privacy Policy</Link> | <Link to="/policy/terms">Terms &amp; Conditions</Link> | <Link to="/policy/refund">Refund Policy</Link></span>
         </div>
       </div>
     </footer>
@@ -126,6 +156,7 @@ export function PublicLayout() {
       <main id="main"><Outlet /></main>
       <Footer />
       <UnavailableBar />
+      <HelpAgent />
       {b.whatsapp && <a className="whatsapp-fab" href={`https://wa.me/${b.whatsapp}`} target="_blank" rel="noreferrer" aria-label="Chat on WhatsApp"><I.whatsapp /></a>}
     </>
   )
